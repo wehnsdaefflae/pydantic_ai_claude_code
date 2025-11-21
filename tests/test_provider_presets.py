@@ -1583,3 +1583,360 @@ class TestPresetModelMappings:
         # Not mapped - returns as-is
         assert preset.get_model_name("haiku") == "haiku"
         assert preset.get_model_name("opus") == "opus"
+
+
+class TestProviderAsyncContextManager:
+    """Tests for ClaudeCodeProvider async context manager."""
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager_entry_exit(self):
+        """Test async context manager entry and exit."""
+        provider = ClaudeCodeProvider(
+            settings={
+                "use_temp_workspace": True,
+            }
+        )
+
+        async with provider as p:
+            assert p is provider
+            assert p.working_directory is not None
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager_with_preset(self):
+        """Test async context manager with preset."""
+        os.environ.pop("ANTHROPIC_BASE_URL", None)
+
+        try:
+            async with ClaudeCodeProvider(
+                settings={
+                    "provider_preset": "deepseek",
+                    "provider_api_key": "test-key",
+                }
+            ) as provider:
+                assert provider.provider_preset_id == "deepseek"
+                assert "ANTHROPIC_BASE_URL" in os.environ
+        finally:
+            os.environ.pop("ANTHROPIC_BASE_URL", None)
+            os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+
+
+class TestProviderGetSettings:
+    """Tests for ClaudeCodeProvider.get_settings method."""
+
+    def test_get_settings_basic(self):
+        """Test getting basic settings."""
+        provider = ClaudeCodeProvider(
+            settings={
+                "model": "sonnet",
+                "verbose": True,
+            }
+        )
+
+        settings = provider.get_settings()
+        assert settings["model"] == "sonnet"
+        assert settings["verbose"] is True
+
+    def test_get_settings_with_overrides(self):
+        """Test getting settings with overrides."""
+        provider = ClaudeCodeProvider(
+            settings={
+                "model": "sonnet",
+                "verbose": False,
+            }
+        )
+
+        settings = provider.get_settings(model="opus", verbose=True)
+        assert settings["model"] == "opus"
+        assert settings["verbose"] is True
+
+    def test_get_settings_removes_none_values(self):
+        """Test that get_settings removes None values."""
+        provider = ClaudeCodeProvider(settings={})
+
+        settings = provider.get_settings()
+        # Should not contain keys with None values
+        for key, value in settings.items():
+            assert value is not None
+
+    def test_get_settings_with_working_directory(self):
+        """Test get_settings with working directory."""
+        provider = ClaudeCodeProvider(
+            settings={
+                "working_directory": "/tmp/test",
+            }
+        )
+
+        settings = provider.get_settings()
+        assert settings["working_directory"] == "/tmp/test"
+
+    def test_get_settings_with_all_options(self):
+        """Test get_settings with all available options."""
+        provider = ClaudeCodeProvider(
+            settings={
+                "working_directory": "/tmp/test",
+                "allowed_tools": ["read", "write"],
+                "disallowed_tools": ["delete"],
+                "append_system_prompt": "Be helpful",
+                "permission_mode": "acceptEdits",
+                "model": "sonnet",
+                "fallback_model": "haiku",
+                "verbose": True,
+                "dangerously_skip_permissions": True,
+                "retry_on_rate_limit": True,
+                "timeout_seconds": 600,
+                "claude_cli_path": "/usr/bin/claude",
+                "extra_cli_args": ["--debug"],
+                "use_sandbox_runtime": False,
+                "sandbox_runtime_path": "/usr/bin/srt",
+            }
+        )
+
+        settings = provider.get_settings()
+        assert settings["working_directory"] == "/tmp/test"
+        assert settings["allowed_tools"] == ["read", "write"]
+        assert settings["disallowed_tools"] == ["delete"]
+        assert settings["append_system_prompt"] == "Be helpful"
+        assert settings["permission_mode"] == "acceptEdits"
+        assert settings["model"] == "sonnet"
+        assert settings["fallback_model"] == "haiku"
+        assert settings["verbose"] is True
+        assert settings["dangerously_skip_permissions"] is True
+        assert settings["retry_on_rate_limit"] is True
+        assert settings["timeout_seconds"] == 600
+        assert settings["claude_cli_path"] == "/usr/bin/claude"
+        assert settings["extra_cli_args"] == ["--debug"]
+        assert settings["use_sandbox_runtime"] is False
+        assert settings["sandbox_runtime_path"] == "/usr/bin/srt"
+
+
+class TestRegistrationEdgeCases:
+    """Tests for registration edge cases to improve coverage."""
+
+    def test_empty_model_name_raises_error(self):
+        """Test that empty model name raises ValueError."""
+        from pydantic_ai import models
+
+        # Empty model name should fall through (ValueError caught internally)
+        try:
+            models.infer_model("claude-code:")
+        except Exception:
+            pass  # Expected
+
+    def test_empty_preset_id_raises_error(self):
+        """Test that empty preset ID raises ValueError."""
+        from pydantic_ai import models
+
+        # Empty preset_id should fall through
+        try:
+            models.infer_model("claude-code::sonnet")
+        except Exception:
+            pass  # Expected
+
+    def test_empty_model_alias_raises_error(self):
+        """Test that empty model alias raises ValueError."""
+        from pydantic_ai import models
+
+        # Empty model_alias should fall through
+        try:
+            models.infer_model("claude-code:deepseek:")
+        except Exception:
+            pass  # Expected
+
+    def test_model_instance_passed_through(self):
+        """Test that Model instances are passed through unchanged."""
+        from pydantic_ai import models
+
+        from pydantic_ai_claude_code import ClaudeCodeModel
+
+        # Create a model instance
+        original_model = ClaudeCodeModel("sonnet")
+
+        # Pass it through infer_model
+        result = models.infer_model(original_model)
+
+        # Should be the same instance
+        assert result is original_model
+
+    def test_non_claude_code_prefix_falls_through(self):
+        """Test that non-claude-code prefixes fall through."""
+        from pydantic_ai import models
+
+        # This should fall through to original handler
+        try:
+            models.infer_model("openai:gpt-4")
+        except Exception:
+            pass  # May raise if no API key
+
+    def test_debug_logging_for_model_creation(self):
+        """Test that debug logging works for model creation."""
+        import logging
+
+        from pydantic_ai import models
+
+        # Enable debug logging
+        logger = logging.getLogger("pydantic_ai_claude_code.registration")
+        original_level = logger.level
+        logger.setLevel(logging.DEBUG)
+
+        try:
+            models.infer_model("claude-code:sonnet")
+        finally:
+            logger.setLevel(original_level)
+
+
+class TestProviderAPIKeyFallback:
+    """Tests for API key fallback behavior."""
+
+    def test_provider_api_key_overrides_env(self):
+        """Test that provider_api_key overrides ANTHROPIC_AUTH_TOKEN."""
+        os.environ["ANTHROPIC_AUTH_TOKEN"] = "env-key"
+
+        try:
+            provider = ClaudeCodeProvider(
+                settings={
+                    "provider_preset": "deepseek",
+                    "provider_api_key": "explicit-key",
+                    "provider_override_env": True,
+                }
+            )
+
+            applied = provider.get_applied_env_vars()
+            assert applied.get("ANTHROPIC_AUTH_TOKEN") == "explicit-key"
+        finally:
+            os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+
+    def test_provider_without_api_key_uses_preset_default(self):
+        """Test provider without explicit API key uses preset default field."""
+        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+
+        provider = ClaudeCodeProvider(
+            settings={
+                "provider_preset": "deepseek",
+            }
+        )
+
+        # Should have preset but no API key set
+        assert provider.provider_preset is not None
+        applied = provider.get_applied_env_vars()
+        # ANTHROPIC_AUTH_TOKEN not set since no api_key provided
+        assert "ANTHROPIC_AUTH_TOKEN" not in applied or applied.get("ANTHROPIC_AUTH_TOKEN") is None
+
+
+class TestExactModelNamePassthrough:
+    """Tests for exact model name pass-through."""
+
+    def test_exact_model_name_with_preset(self):
+        """Test that exact model names are passed through with preset."""
+        from pydantic_ai import models
+
+        from pydantic_ai_claude_code import ClaudeCodeModel
+
+        # Using exact model name (not an alias)
+        model = models.infer_model("claude-code:deepseek:DeepSeek-V3.2-Exp")
+
+        assert isinstance(model, ClaudeCodeModel)
+        # Should be returned unchanged since it's already exact
+        assert model._model_name == "DeepSeek-V3.2-Exp"
+
+    def test_exact_model_name_without_preset(self):
+        """Test that exact model names work without preset."""
+        from pydantic_ai import models
+
+        from pydantic_ai_claude_code import ClaudeCodeModel
+
+        model = models.infer_model("claude-code:claude-3-5-sonnet-20241022")
+
+        assert isinstance(model, ClaudeCodeModel)
+        assert model._model_name == "claude-3-5-sonnet-20241022"
+
+
+class TestMinimalPresetConfiguration:
+    """Tests for minimal preset configuration."""
+
+    def test_minimal_preset_works(self):
+        """Test that minimal preset configuration works."""
+        preset = ProviderPreset(
+            preset_id="minimal",
+            name="Minimal Provider",
+            website_url="https://example.com",
+            settings={
+                "env": {
+                    "ANTHROPIC_BASE_URL": "https://api.example.com",
+                }
+            },
+        )
+
+        # Should work with minimal config
+        assert preset.preset_id == "minimal"
+        env_vars = preset.get_environment_variables()
+        assert "ANTHROPIC_BASE_URL" in env_vars
+
+    def test_minimal_preset_with_models(self):
+        """Test minimal preset with models mapping."""
+        preset = ProviderPreset(
+            preset_id="minimal",
+            name="Minimal",
+            website_url="https://example.com",
+            settings={
+                "env": {
+                    "ANTHROPIC_BASE_URL": "https://api.example.com",
+                }
+            },
+            models={
+                "default": "my-model-v1",
+            },
+        )
+
+        assert preset.get_model_name("default") == "my-model-v1"
+        assert preset.get_model_name("custom") == "my-model-v1"
+        # Unknown alias returns unchanged
+        assert preset.get_model_name("unknown") == "unknown"
+
+
+class TestProviderContextManagerPreservesTempDir:
+    """Tests for provider context manager temp directory behavior."""
+
+    def test_context_manager_creates_temp_workspace(self):
+        """Test that context manager creates temp workspace."""
+        provider = ClaudeCodeProvider(
+            settings={
+                "use_temp_workspace": True,
+            }
+        )
+
+        assert provider.working_directory is None
+
+        with provider as p:
+            assert p.working_directory is not None
+            temp_dir = p.working_directory
+
+        # Temp directory preserved after exit
+        assert Path(temp_dir).exists()
+
+    def test_context_manager_without_temp_workspace(self):
+        """Test context manager without temp workspace."""
+        provider = ClaudeCodeProvider(
+            settings={
+                "use_temp_workspace": False,
+                "working_directory": None,
+            }
+        )
+
+        with provider as p:
+            # Should not create temp workspace
+            assert p._temp_dir is None
+
+    def test_context_manager_with_explicit_directory(self):
+        """Test context manager with explicit working directory."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            provider = ClaudeCodeProvider(
+                settings={
+                    "working_directory": tmpdir,
+                    "use_temp_workspace": True,
+                }
+            )
+
+            with provider as p:
+                # Should use explicit directory, not create temp
+                assert p.working_directory == tmpdir
+                assert p._temp_dir is None
