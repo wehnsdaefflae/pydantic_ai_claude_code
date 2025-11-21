@@ -730,7 +730,7 @@ def _execute_sync_command(
         cmd: Command to execute
         cwd: Working directory
         timeout_seconds: Timeout in seconds
-        settings: Optional settings (for sandbox env vars)
+        settings: Optional settings (for sandbox and provider env vars)
 
     Returns:
         Completed process result
@@ -740,12 +740,27 @@ def _execute_sync_command(
     """
     start_time = time.time()
 
-    # Get sandbox environment variables if present
+    # Build subprocess environment with provider and sandbox env vars
     env = None
-    if settings and settings.get("__sandbox_env"):
+    has_custom_env = False
+
+    # Start with provider environment variables if present
+    if settings and settings.get("__provider_env"):
         env = os.environ.copy()
+        env.update(settings["__provider_env"])
+        has_custom_env = True
+        logger.debug("Using provider environment: %s", list(settings["__provider_env"].keys()))
+
+    # Add sandbox environment variables if present (these take precedence)
+    if settings and settings.get("__sandbox_env"):
+        if env is None:
+            env = os.environ.copy()
         env.update(settings["__sandbox_env"])
+        has_custom_env = True
         logger.debug("Using sandbox environment: %s", settings["__sandbox_env"])
+
+    if has_custom_env:
+        logger.debug("Custom environment configured for subprocess")
 
     try:
         logger.info("Running Claude CLI synchronously in %s", cwd)
@@ -1120,7 +1135,7 @@ async def _execute_async_command(
         cmd: Command to execute
         cwd: Working directory
         timeout_seconds: Timeout in seconds
-        settings: Optional settings (for sandbox env vars)
+        settings: Optional settings (for sandbox and provider env vars)
 
     Returns:
         Tuple of (stdout, stderr, returncode)
@@ -1131,12 +1146,27 @@ async def _execute_async_command(
     start_time = time.time()
     logger.info("Running Claude CLI asynchronously in %s", cwd)
 
-    # Get sandbox environment variables if present
+    # Build subprocess environment with provider and sandbox env vars
     env = None
-    if settings and settings.get("__sandbox_env"):
+    has_custom_env = False
+
+    # Start with provider environment variables if present
+    if settings and settings.get("__provider_env"):
         env = os.environ.copy()
+        env.update(settings["__provider_env"])
+        has_custom_env = True
+        logger.debug("Using provider environment: %s", list(settings["__provider_env"].keys()))
+
+    # Add sandbox environment variables if present (these take precedence)
+    if settings and settings.get("__sandbox_env"):
+        if env is None:
+            env = os.environ.copy()
         env.update(settings["__sandbox_env"])
+        has_custom_env = True
         logger.debug("Using sandbox environment: %s", settings["__sandbox_env"])
+
+    if has_custom_env:
+        logger.debug("Custom environment configured for subprocess")
 
     process = await create_subprocess_async(cmd, cwd, env)
 

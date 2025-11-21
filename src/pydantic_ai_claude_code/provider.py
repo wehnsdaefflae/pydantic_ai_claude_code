@@ -9,7 +9,7 @@ from typing_extensions import Self
 
 from .provider_presets import (
     ProviderPreset,
-    apply_provider_environment,
+    compute_provider_environment,
     get_preset,
 )
 from .types import ClaudeCodeSettings
@@ -27,7 +27,7 @@ class ClaudeCodeProvider:
 
     def __init__(self, settings: ClaudeCodeSettings | None = None):
         """
-        Initialize the Claude Code provider and apply configuration and provider preset environment variables.
+        Initialize the Claude Code provider and compute provider preset environment variables.
 
         Parameters:
             settings (ClaudeCodeSettings | None): Optional configuration mapping. Recognized keys include common runtime settings (working_directory, allowed_tools, disallowed_tools, append_system_prompt, permission_mode, model, fallback_model, verbose, timeout_seconds, claude_cli_path, extra_cli_args) and flags controlling behavior:
@@ -40,14 +40,11 @@ class ClaudeCodeProvider:
                 - provider_template_vars: template variable values to apply to the preset
                 - provider_override_env: if true, override existing environment variables when applying the preset
 
-        Warning:
-            If a provider_preset is specified, this constructor modifies the global ``os.environ``
-            dictionary by setting environment variables from the preset (e.g., ANTHROPIC_BASE_URL).
-            These changes persist for the lifetime of the process and may affect other code.
-            Use ``get_applied_env_vars()`` to see which variables were set.
-
         Notes:
-            If a provider_preset is specified and found, its environment variables are applied and stored internally; if not found, a warning is logged.
+            If a provider_preset is specified and found, its environment variables are computed and stored
+            internally for later use in subprocess calls. These variables are NOT applied to the global
+            os.environ; instead they are passed directly to the Claude CLI subprocess. If the preset is
+            not found, a warning is logged. Use ``get_applied_env_vars()`` to see which variables will be set.
         """
         config = settings or {}
 
@@ -59,15 +56,15 @@ class ClaudeCodeProvider:
         if self.provider_preset_id:
             self.provider_preset = get_preset(self.provider_preset_id)
             if self.provider_preset:
-                # Apply provider environment variables
-                self._applied_env_vars = apply_provider_environment(
+                # Compute provider environment variables (do NOT modify global os.environ)
+                self._applied_env_vars = compute_provider_environment(
                     self.provider_preset,
                     api_key=config.get("provider_api_key"),
                     template_vars=config.get("provider_template_vars"),
                     override_existing=config.get("provider_override_env", False),
                 )
                 logger.info(
-                    "Applied provider preset '%s' with %d environment variables",
+                    "Computed provider preset '%s' with %d environment variables",
                     self.provider_preset_id,
                     len(self._applied_env_vars),
                 )
@@ -202,6 +199,10 @@ class ClaudeCodeProvider:
             "use_sandbox_runtime": self.use_sandbox_runtime,
             "sandbox_runtime_path": self.sandbox_runtime_path,
         }
+
+        # Include provider environment variables for subprocess execution
+        if self._applied_env_vars:
+            settings["__provider_env"] = self._applied_env_vars.copy()
 
         # Apply overrides
         for key, value in overrides.items():

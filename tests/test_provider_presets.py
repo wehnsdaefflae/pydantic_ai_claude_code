@@ -990,7 +990,7 @@ class TestProviderPresetIntegration:
             os.environ.pop("ANTHROPIC_BASE_URL", None)
 
     def test_provider_override_env_enabled(self):
-        """Test that provider overrides existing env vars when requested."""
+        """Test that provider includes vars for override when requested."""
         os.environ["ANTHROPIC_BASE_URL"] = "https://original.example.com"
 
         try:
@@ -1001,12 +1001,15 @@ class TestProviderPresetIntegration:
                 }
             )
 
-            # Should be overridden
-            assert "deepseek" in os.getenv("ANTHROPIC_BASE_URL", "")
+            # Global env should NOT be modified (this is the key change from the refactor)
+            # The override_env flag now controls whether vars are INCLUDED for subprocess
+            # not whether they're applied to global env
+            assert os.getenv("ANTHROPIC_BASE_URL") == "https://original.example.com"
 
-            # Applied vars should include the overridden one
+            # Applied vars should include the overridden one (will be passed to subprocess)
             applied = provider.get_applied_env_vars()
             assert "ANTHROPIC_BASE_URL" in applied
+            assert "deepseek" in applied["ANTHROPIC_BASE_URL"]
         finally:
             os.environ.pop("ANTHROPIC_BASE_URL", None)
 
@@ -1394,11 +1397,14 @@ class TestProviderContextManager:
                 }
             ) as provider:
                 assert provider.provider_preset_id == "deepseek"
-                assert "ANTHROPIC_BASE_URL" in os.environ
+                # Global env should NOT be modified (refactored behavior)
+                # Env vars are stored for subprocess execution instead
+                applied = provider.get_applied_env_vars()
+                assert "ANTHROPIC_BASE_URL" in applied
+                assert "deepseek" in applied["ANTHROPIC_BASE_URL"]
 
-            # Environment should still be set after context exit
-            # (preset env vars persist for the process)
-            assert "ANTHROPIC_BASE_URL" in os.environ
+            # Global env should not have been modified
+            assert "ANTHROPIC_BASE_URL" not in os.environ
         finally:
             os.environ.pop("ANTHROPIC_BASE_URL", None)
             os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
@@ -1614,7 +1620,14 @@ class TestProviderAsyncContextManager:
                 }
             ) as provider:
                 assert provider.provider_preset_id == "deepseek"
-                assert "ANTHROPIC_BASE_URL" in os.environ
+                # Global env should NOT be modified (refactored behavior)
+                # Env vars are stored for subprocess execution instead
+                applied = provider.get_applied_env_vars()
+                assert "ANTHROPIC_BASE_URL" in applied
+                assert "deepseek" in applied["ANTHROPIC_BASE_URL"]
+
+            # Global env should not have been modified
+            assert "ANTHROPIC_BASE_URL" not in os.environ
         finally:
             os.environ.pop("ANTHROPIC_BASE_URL", None)
             os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)

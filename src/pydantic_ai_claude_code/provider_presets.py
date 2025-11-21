@@ -471,6 +471,43 @@ def get_presets_by_category(
     return [p for p in presets.values() if p.category == category]
 
 
+def compute_provider_environment(
+    preset: ProviderPreset,
+    api_key: str | None = None,
+    template_vars: dict[str, str] | None = None,
+    override_existing: bool = False,
+) -> dict[str, str]:
+    """
+    Compute environment variables for a provider preset without modifying global state.
+
+    This function determines which environment variables should be set based on the preset
+    configuration and the override_existing flag, but does NOT modify os.environ.
+
+    Parameters:
+        preset (ProviderPreset): The provider preset whose environment settings will be computed.
+        api_key (str | None): If provided, include the preset's API key field with this value.
+        template_vars (dict[str, str] | None): Values used to substitute placeholders in environment values.
+        override_existing (bool): If True, include variables even if they exist in os.environ; otherwise skip them.
+
+    Returns:
+        dict[str, str]: Mapping of environment variable names to values that would be applied.
+    """
+    env_vars = preset.get_environment_variables(api_key, template_vars)
+    computed: dict[str, str] = {}
+
+    for key, value in env_vars.items():
+        if override_existing or key not in os.environ:
+            computed[key] = value
+            logger.debug("Computed environment variable: %s", key)
+        else:
+            logger.debug(
+                "Skipping existing environment variable: %s (use override_existing=True to override)",
+                key,
+            )
+
+    return computed
+
+
 def apply_provider_environment(
     preset: ProviderPreset,
     api_key: str | None = None,
@@ -479,13 +516,16 @@ def apply_provider_environment(
 ) -> dict[str, str]:
     """
     Apply environment variables defined by a provider preset to the current process environment.
-    
+
+    WARNING: This function modifies global os.environ. Consider using compute_provider_environment()
+    instead and passing the environment variables directly to subprocess calls.
+
     Parameters:
         preset (ProviderPreset): The provider preset whose environment settings will be applied.
         api_key (str | None): If provided, set the preset's API key field to this value.
         template_vars (dict[str, str] | None): Values used to substitute placeholders in environment values.
         override_existing (bool): If True, overwrite existing environment variables; otherwise preserve them.
-    
+
     Returns:
         dict[str, str]: Mapping of environment variable names to values that were actually set.
     """
