@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from pydantic_ai_claude_code import (
+    ClaudeCodeModel,
     ClaudeCodeProvider,
     ProviderPreset,
     get_preset,
@@ -495,118 +496,73 @@ class TestApplyProviderEnvironment:
 
 
 class TestClaudeCodeProviderWithPresets:
-    """Tests for ClaudeCodeProvider with preset support."""
+    """Tests for ClaudeCodeProvider with preset support using new stateless API."""
 
-    def test_provider_with_preset(self):
-        """Test creating provider with preset."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "provider_preset": "deepseek",
-            }
-        )
+    def test_provider_creates_model_with_preset(self):
+        """Test creating model with preset via provider."""
+        provider = ClaudeCodeProvider()
+        model = provider.create_model("sonnet", provider_preset="deepseek")
 
-        assert provider.provider_preset_id == "deepseek"
-        assert provider.provider_preset is not None
-        assert provider.provider_preset.name == "DeepSeek"
+        assert isinstance(model, ClaudeCodeModel)
+        assert model._provider_preset_id == "deepseek"
+        assert model._provider_preset is not None
+        assert model._provider_preset.name == "DeepSeek"
 
-    def test_provider_preset_sets_env_vars(self):
-        """Test that provider preset sets environment variables."""
-        # Clear any existing vars
-        os.environ.pop("ANTHROPIC_BASE_URL", None)
-        os.environ.pop("ANTHROPIC_MODEL", None)
+    def test_model_with_preset_has_env_vars(self):
+        """Test that model with preset has computed environment variables."""
+        provider = ClaudeCodeProvider()
+        model = provider.create_model("sonnet", provider_preset="deepseek")
 
-        try:
-            provider = ClaudeCodeProvider(
-                settings={
-                    "provider_preset": "deepseek",
-                }
-            )
+        # Should have computed environment variables
+        assert len(model._preset_env_vars) > 0
+        assert "ANTHROPIC_BASE_URL" in model._preset_env_vars
+        assert "deepseek" in model._preset_env_vars["ANTHROPIC_BASE_URL"]
 
-            # Should have set environment variables
-            assert len(provider._applied_env_vars) > 0
-
-            # Check that vars were applied
-            applied = provider.get_applied_env_vars()
-            assert "ANTHROPIC_BASE_URL" in applied or os.getenv("ANTHROPIC_BASE_URL")
-        finally:
-            # Cleanup
-            os.environ.pop("ANTHROPIC_BASE_URL", None)
-            os.environ.pop("ANTHROPIC_MODEL", None)
-
-    def test_provider_with_api_key(self):
-        """Test provider with preset and API key."""
-        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
-        try:
-            provider = ClaudeCodeProvider(
-                settings={
-                    "provider_preset": "deepseek",
-                    "provider_api_key": "my-test-key",
-                }
-            )
-
-            applied = provider.get_applied_env_vars()
-            assert applied.get("ANTHROPIC_AUTH_TOKEN") == "my-test-key"
-        finally:
-            os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
-    def test_provider_model_name_mapping(self):
-        """Test model name mapping through provider."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "provider_preset": "deepseek",
-            }
-        )
+    def test_model_name_mapping(self):
+        """Test model name mapping through preset."""
+        provider = ClaudeCodeProvider()
+        model = provider.create_model("sonnet", provider_preset="deepseek")
 
         # DeepSeek maps sonnet to DeepSeek-V3.2-Exp
-        model_name = provider.get_model_name("sonnet")
-        assert model_name == "DeepSeek-V3.2-Exp"
+        assert model._actual_model_name == "DeepSeek-V3.2-Exp"
 
-        # Unknown alias should be returned unchanged
-        unknown_alias = "unknown_model"
-        mapped_name = provider.get_model_name(unknown_alias)
-        assert mapped_name == unknown_alias
+    def test_model_without_preset(self):
+        """Test model without preset works normally."""
+        provider = ClaudeCodeProvider()
+        model = provider.create_model("sonnet")
 
-    def test_provider_with_template_vars(self):
-        """Test provider with template variables."""
-        os.environ.pop("ANTHROPIC_BASE_URL", None)
+        assert model._model_alias == "sonnet"
+        assert model._actual_model_name == "sonnet"
+        assert model._provider_preset_id is None
+        assert model._provider_preset is None
+        assert len(model._preset_env_vars) == 0
 
-        try:
-            provider = ClaudeCodeProvider(
-                settings={
-                    "provider_preset": "kat_coder",
-                    "provider_template_vars": {"ENDPOINT_ID": "ep-test-123"},
-                }
-            )
+    def test_model_with_nonexistent_preset(self):
+        """Test model with nonexistent preset doesn't crash."""
+        provider = ClaudeCodeProvider()
+        model = provider.create_model("sonnet", provider_preset="nonexistent_provider")
 
-            applied = provider.get_applied_env_vars()
-            assert "ep-test-123" in applied.get("ANTHROPIC_BASE_URL", "")
-        finally:
-            os.environ.pop("ANTHROPIC_BASE_URL", None)
+        assert model._provider_preset_id == "nonexistent_provider"
+        assert model._provider_preset is None
+        assert len(model._preset_env_vars) == 0
 
-    def test_provider_with_nonexistent_preset(self):
-        """Test provider with nonexistent preset doesn't crash."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "provider_preset": "nonexistent_provider",
-            }
-        )
+    def test_provider_with_custom_cli_path(self):
+        """Test provider with custom CLI path."""
+        provider = ClaudeCodeProvider(cli_path="/custom/path/claude")
+        model = provider.create_model("sonnet")
 
-        assert provider.provider_preset_id == "nonexistent_provider"
-        assert provider.provider_preset is None
-        assert len(provider._applied_env_vars) == 0
+        assert model._cli_path == "/custom/path/claude"
 
-    def test_provider_without_preset(self):
-        """Test provider without preset works normally."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "model": "sonnet",
-            }
-        )
+    def test_provider_creates_different_models(self):
+        """Test provider creates independent model instances."""
+        provider = ClaudeCodeProvider()
+        model1 = provider.create_model("sonnet", provider_preset="deepseek")
+        model2 = provider.create_model("haiku", provider_preset="zhipu_glm")
 
-        assert provider.provider_preset_id is None
-        assert provider.provider_preset is None
-        assert provider.model == "sonnet"
+        assert model1._actual_model_name == "DeepSeek-V3.2-Exp"
+        assert model2._actual_model_name == "glm-4.5-air"
+        assert model1._provider_preset_id == "deepseek"
+        assert model2._provider_preset_id == "zhipu_glm"
 
 
 class TestModelRegistration:
@@ -616,37 +572,31 @@ class TestModelRegistration:
         """Test standard claude-code:model format."""
         from pydantic_ai import models
 
-        from pydantic_ai_claude_code import ClaudeCodeModel
-
         model = models.infer_model("claude-code:sonnet")
 
         assert isinstance(model, ClaudeCodeModel)
-        assert model._model_name == "sonnet"
+        assert model._model_alias == "sonnet"
 
     def test_preset_model_string(self):
         """Test claude-code:preset:model format."""
         from pydantic_ai import models
 
-        from pydantic_ai_claude_code import ClaudeCodeModel
-
         model = models.infer_model("claude-code:deepseek:sonnet")
 
         assert isinstance(model, ClaudeCodeModel)
         # Model name should be mapped to DeepSeek model
-        assert model._model_name == "DeepSeek-V3.2-Exp"
-        # Provider should have preset loaded
-        assert model.provider.provider_preset_id == "deepseek"
+        assert model._actual_model_name == "DeepSeek-V3.2-Exp"
+        # Model should have preset loaded
+        assert model._provider_preset_id == "deepseek"
 
     def test_custom_model_alias(self):
         """Test custom model alias."""
         from pydantic_ai import models
 
-        from pydantic_ai_claude_code import ClaudeCodeModel
-
         model = models.infer_model("claude-code:custom")
 
         assert isinstance(model, ClaudeCodeModel)
-        assert model._model_name == "custom"
+        assert model._model_alias == "custom"
 
 
 class TestParsePresetDict:
@@ -898,120 +848,54 @@ class TestTemplateSubstitutionEdgeCases:
 
 
 class TestProviderPresetIntegration:
-    """Integration tests for provider presets with ClaudeCodeProvider."""
+    """Integration tests for provider presets with ClaudeCodeModel."""
 
-    def test_provider_with_deepseek_preset(self):
-        """Test provider initialization with DeepSeek preset."""
-        # Clear any existing env vars
-        os.environ.pop("ANTHROPIC_BASE_URL", None)
-        os.environ.pop("ANTHROPIC_MODEL", None)
+    def test_model_with_deepseek_preset(self):
+        """Test model initialization with DeepSeek preset."""
+        model = ClaudeCodeModel("sonnet", provider_preset="deepseek")
 
-        try:
-            provider = ClaudeCodeProvider(
-                settings={
-                    "provider_preset": "deepseek",
-                    "provider_api_key": "test-api-key",
-                }
-            )
+        assert model._provider_preset_id == "deepseek"
+        assert model._provider_preset is not None
+        assert model._provider_preset.name == "DeepSeek"
 
-            assert provider.provider_preset_id == "deepseek"
-            assert provider.provider_preset is not None
-            assert provider.provider_preset.name == "DeepSeek"
+        # Check that environment variables were computed
+        assert "ANTHROPIC_BASE_URL" in model._preset_env_vars
+        assert "deepseek" in model._preset_env_vars["ANTHROPIC_BASE_URL"]
 
-            # Check that environment variables were applied
-            applied = provider.get_applied_env_vars()
-            assert "ANTHROPIC_BASE_URL" in applied
-            assert "deepseek" in applied["ANTHROPIC_BASE_URL"]
-            assert "ANTHROPIC_AUTH_TOKEN" in applied
-            assert applied["ANTHROPIC_AUTH_TOKEN"] == "test-api-key"
-        finally:
-            # Cleanup
-            for key in ["ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN"]:
-                os.environ.pop(key, None)
+    def test_model_name_with_preset(self):
+        """Test model name mapping with preset loaded."""
+        model = ClaudeCodeModel("sonnet", provider_preset="deepseek")
 
-    def test_provider_get_model_name_with_preset(self):
-        """Test get_model_name method with preset loaded."""
-        provider = ClaudeCodeProvider(
-            settings={"provider_preset": "deepseek"}
-        )
+        # DeepSeek maps all aliases to same model
+        assert model._actual_model_name == "DeepSeek-V3.2-Exp"
 
-        # DeepSeek uses same model for all aliases
-        assert provider.get_model_name("sonnet") == "DeepSeek-V3.2-Exp"
-        assert provider.get_model_name("haiku") == "DeepSeek-V3.2-Exp"
-        assert provider.get_model_name("opus") == "DeepSeek-V3.2-Exp"
+    def test_model_name_without_preset(self):
+        """Test model name without preset."""
+        model = ClaudeCodeModel("sonnet")
 
-    def test_provider_get_model_name_without_preset(self):
-        """Test get_model_name method without preset."""
-        provider = ClaudeCodeProvider(settings={})
+        # Should be unchanged
+        assert model._actual_model_name == "sonnet"
 
-        # Should return as-is
-        assert provider.get_model_name("sonnet") == "sonnet"
-        assert provider.get_model_name("custom-model") == "custom-model"
+    def test_model_haiku_mapping(self):
+        """Test haiku model mapping."""
+        model = ClaudeCodeModel("haiku", provider_preset="deepseek")
 
-    def test_provider_with_template_vars(self):
-        """Test provider with template variables."""
-        os.environ.pop("ANTHROPIC_BASE_URL", None)
+        # DeepSeek maps haiku to same model
+        assert model._actual_model_name == "DeepSeek-V3.2-Exp"
 
-        try:
-            provider = ClaudeCodeProvider(
-                settings={
-                    "provider_preset": "kat_coder",
-                    "provider_api_key": "test-key",
-                    "provider_template_vars": {"ENDPOINT_ID": "ep-test-123"},
-                }
-            )
+    def test_model_opus_mapping(self):
+        """Test opus model mapping."""
+        model = ClaudeCodeModel("opus", provider_preset="deepseek")
 
-            applied = provider.get_applied_env_vars()
-            assert "ANTHROPIC_BASE_URL" in applied
-            assert "ep-test-123" in applied["ANTHROPIC_BASE_URL"]
-        finally:
-            os.environ.pop("ANTHROPIC_BASE_URL", None)
-            os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+        # DeepSeek maps opus to same model
+        assert model._actual_model_name == "DeepSeek-V3.2-Exp"
 
-    def test_provider_override_env_disabled(self):
-        """Test that provider doesn't override existing env vars by default."""
-        os.environ["ANTHROPIC_BASE_URL"] = "https://original.example.com"
+    def test_model_zhipu_preset(self):
+        """Test model with Zhipu preset."""
+        model = ClaudeCodeModel("sonnet", provider_preset="zhipu_glm")
 
-        try:
-            provider = ClaudeCodeProvider(
-                settings={
-                    "provider_preset": "deepseek",
-                    "provider_override_env": False,
-                }
-            )
-
-            # Original value should be preserved
-            assert os.getenv("ANTHROPIC_BASE_URL") == "https://original.example.com"
-
-            # Applied vars should not include the overridden one
-            applied = provider.get_applied_env_vars()
-            assert "ANTHROPIC_BASE_URL" not in applied
-        finally:
-            os.environ.pop("ANTHROPIC_BASE_URL", None)
-
-    def test_provider_override_env_enabled(self):
-        """Test that provider includes vars for override when requested."""
-        os.environ["ANTHROPIC_BASE_URL"] = "https://original.example.com"
-
-        try:
-            provider = ClaudeCodeProvider(
-                settings={
-                    "provider_preset": "deepseek",
-                    "provider_override_env": True,
-                }
-            )
-
-            # Global env should NOT be modified (this is the key change from the refactor)
-            # The override_env flag now controls whether vars are INCLUDED for subprocess
-            # not whether they're applied to global env
-            assert os.getenv("ANTHROPIC_BASE_URL") == "https://original.example.com"
-
-            # Applied vars should include the overridden one (will be passed to subprocess)
-            applied = provider.get_applied_env_vars()
-            assert "ANTHROPIC_BASE_URL" in applied
-            assert "deepseek" in applied["ANTHROPIC_BASE_URL"]
-        finally:
-            os.environ.pop("ANTHROPIC_BASE_URL", None)
+        assert model._provider_preset_id == "zhipu_glm"
+        assert model._actual_model_name == "glm-4.6"
 
 
 class TestModelRegistrationEdgeCases:
@@ -1049,36 +933,30 @@ class TestModelRegistrationEdgeCases:
         """Test model registration with Zhipu GLM preset."""
         from pydantic_ai import models
 
-        from pydantic_ai_claude_code import ClaudeCodeModel
-
         model = models.infer_model("claude-code:zhipu_glm:sonnet")
 
         assert isinstance(model, ClaudeCodeModel)
-        assert model._model_name == "glm-4.6"
-        assert model.provider.provider_preset_id == "zhipu_glm"
+        assert model._actual_model_name == "glm-4.6"
+        assert model._provider_preset_id == "zhipu_glm"
 
     def test_preset_with_haiku_alias(self):
         """Test model registration with haiku alias."""
         from pydantic_ai import models
 
-        from pydantic_ai_claude_code import ClaudeCodeModel
-
         model = models.infer_model("claude-code:zhipu_glm:haiku")
 
         assert isinstance(model, ClaudeCodeModel)
-        assert model._model_name == "glm-4.5-air"
+        assert model._actual_model_name == "glm-4.5-air"
 
     def test_preset_with_nonexistent_alias(self):
         """Test model registration with nonexistent model alias."""
         from pydantic_ai import models
 
-        from pydantic_ai_claude_code import ClaudeCodeModel
-
         model = models.infer_model("claude-code:deepseek:nonexistent")
 
         assert isinstance(model, ClaudeCodeModel)
         # Should return alias as-is if not in mapping
-        assert model._model_name == "nonexistent"
+        assert model._actual_model_name == "nonexistent"
 
 
 class TestYAMLFileErrors:
@@ -1382,34 +1260,6 @@ class TestSpecificPresetConfigurations:
         assert "modelscope" in preset.website_url
 
 
-class TestProviderContextManager:
-    """Tests for ClaudeCodeProvider context manager functionality."""
-
-    def test_provider_context_manager_with_preset(self):
-        """Test provider as context manager with preset."""
-        os.environ.pop("ANTHROPIC_BASE_URL", None)
-
-        try:
-            with ClaudeCodeProvider(
-                settings={
-                    "provider_preset": "deepseek",
-                    "provider_api_key": "test-key",
-                }
-            ) as provider:
-                assert provider.provider_preset_id == "deepseek"
-                # Global env should NOT be modified (refactored behavior)
-                # Env vars are stored for subprocess execution instead
-                applied = provider.get_applied_env_vars()
-                assert "ANTHROPIC_BASE_URL" in applied
-                assert "deepseek" in applied["ANTHROPIC_BASE_URL"]
-
-            # Global env should not have been modified
-            assert "ANTHROPIC_BASE_URL" not in os.environ
-        finally:
-            os.environ.pop("ANTHROPIC_BASE_URL", None)
-            os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
-
 class TestEmptyAndNullConfigurations:
     """Tests for empty and null preset configurations."""
 
@@ -1481,33 +1331,27 @@ class TestCategoryFiltering:
 
 
 class TestConcurrentPresetAccess:
-    """Tests for concurrent access to preset configurations."""
+    """Tests for concurrent access to preset configurations using new API."""
 
-    def test_multiple_providers_same_preset(self):
-        """Test that multiple providers can use the same preset."""
-        provider1 = ClaudeCodeProvider(
-            settings={"provider_preset": "deepseek"}
-        )
-        provider2 = ClaudeCodeProvider(
-            settings={"provider_preset": "deepseek"}
-        )
+    def test_multiple_models_same_preset(self):
+        """Test that multiple models can use the same preset."""
+        provider = ClaudeCodeProvider()
+        model1 = provider.create_model("sonnet", provider_preset="deepseek")
+        model2 = provider.create_model("haiku", provider_preset="deepseek")
 
-        assert provider1.provider_preset_id == provider2.provider_preset_id
-        assert provider1.provider_preset is not None
-        assert provider2.provider_preset is not None
+        assert model1._provider_preset_id == model2._provider_preset_id
+        assert model1._provider_preset is not None
+        assert model2._provider_preset is not None
 
-    def test_multiple_providers_different_presets(self):
-        """Test that multiple providers can use different presets."""
-        provider1 = ClaudeCodeProvider(
-            settings={"provider_preset": "deepseek"}
-        )
-        provider2 = ClaudeCodeProvider(
-            settings={"provider_preset": "zhipu_glm"}
-        )
+    def test_multiple_models_different_presets(self):
+        """Test that multiple models can use different presets."""
+        provider = ClaudeCodeProvider()
+        model1 = provider.create_model("sonnet", provider_preset="deepseek")
+        model2 = provider.create_model("sonnet", provider_preset="zhipu_glm")
 
-        assert provider1.provider_preset_id != provider2.provider_preset_id
-        assert provider1.provider_preset.name == "DeepSeek"
-        assert provider2.provider_preset.name == "Zhipu GLM"
+        assert model1._provider_preset_id != model2._provider_preset_id
+        assert model1._provider_preset.name == "DeepSeek"
+        assert model2._provider_preset.name == "Zhipu GLM"
 
 
 class TestPresetValidation:
@@ -1591,137 +1435,6 @@ class TestPresetModelMappings:
         assert preset.get_model_name("opus") == "opus"
 
 
-class TestProviderAsyncContextManager:
-    """Tests for ClaudeCodeProvider async context manager."""
-
-    @pytest.mark.asyncio
-    async def test_async_context_manager_entry_exit(self):
-        """Test async context manager entry and exit."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "use_temp_workspace": True,
-            }
-        )
-
-        async with provider as p:
-            assert p is provider
-            assert p.working_directory is not None
-
-    @pytest.mark.asyncio
-    async def test_async_context_manager_with_preset(self):
-        """Test async context manager with preset."""
-        os.environ.pop("ANTHROPIC_BASE_URL", None)
-
-        try:
-            async with ClaudeCodeProvider(
-                settings={
-                    "provider_preset": "deepseek",
-                    "provider_api_key": "test-key",
-                }
-            ) as provider:
-                assert provider.provider_preset_id == "deepseek"
-                # Global env should NOT be modified (refactored behavior)
-                # Env vars are stored for subprocess execution instead
-                applied = provider.get_applied_env_vars()
-                assert "ANTHROPIC_BASE_URL" in applied
-                assert "deepseek" in applied["ANTHROPIC_BASE_URL"]
-
-            # Global env should not have been modified
-            assert "ANTHROPIC_BASE_URL" not in os.environ
-        finally:
-            os.environ.pop("ANTHROPIC_BASE_URL", None)
-            os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
-
-class TestProviderGetSettings:
-    """Tests for ClaudeCodeProvider.get_settings method."""
-
-    def test_get_settings_basic(self):
-        """Test getting basic settings."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "model": "sonnet",
-                "verbose": True,
-            }
-        )
-
-        settings = provider.get_settings()
-        assert settings["model"] == "sonnet"
-        assert settings["verbose"] is True
-
-    def test_get_settings_with_overrides(self):
-        """Test getting settings with overrides."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "model": "sonnet",
-                "verbose": False,
-            }
-        )
-
-        settings = provider.get_settings(model="opus", verbose=True)
-        assert settings["model"] == "opus"
-        assert settings["verbose"] is True
-
-    def test_get_settings_removes_none_values(self):
-        """Test that get_settings removes None values."""
-        provider = ClaudeCodeProvider(settings={})
-
-        settings = provider.get_settings()
-        # Should not contain keys with None values
-        for key, value in settings.items():
-            assert value is not None
-
-    def test_get_settings_with_working_directory(self):
-        """Test get_settings with working directory."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "working_directory": "/tmp/test",
-            }
-        )
-
-        settings = provider.get_settings()
-        assert settings["working_directory"] == "/tmp/test"
-
-    def test_get_settings_with_all_options(self):
-        """Test get_settings with all available options."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "working_directory": "/tmp/test",
-                "allowed_tools": ["read", "write"],
-                "disallowed_tools": ["delete"],
-                "append_system_prompt": "Be helpful",
-                "permission_mode": "acceptEdits",
-                "model": "sonnet",
-                "fallback_model": "haiku",
-                "verbose": True,
-                "dangerously_skip_permissions": True,
-                "retry_on_rate_limit": True,
-                "timeout_seconds": 600,
-                "claude_cli_path": "/usr/bin/claude",
-                "extra_cli_args": ["--debug"],
-                "use_sandbox_runtime": False,
-                "sandbox_runtime_path": "/usr/bin/srt",
-            }
-        )
-
-        settings = provider.get_settings()
-        assert settings["working_directory"] == "/tmp/test"
-        assert settings["allowed_tools"] == ["read", "write"]
-        assert settings["disallowed_tools"] == ["delete"]
-        assert settings["append_system_prompt"] == "Be helpful"
-        assert settings["permission_mode"] == "acceptEdits"
-        assert settings["model"] == "sonnet"
-        assert settings["fallback_model"] == "haiku"
-        assert settings["verbose"] is True
-        assert settings["dangerously_skip_permissions"] is True
-        assert settings["retry_on_rate_limit"] is True
-        assert settings["timeout_seconds"] == 600
-        assert settings["claude_cli_path"] == "/usr/bin/claude"
-        assert settings["extra_cli_args"] == ["--debug"]
-        assert settings["use_sandbox_runtime"] is False
-        assert settings["sandbox_runtime_path"] == "/usr/bin/srt"
-
-
 class TestRegistrationEdgeCases:
     """Tests for registration edge cases to improve coverage."""
 
@@ -1759,8 +1472,6 @@ class TestRegistrationEdgeCases:
         """Test that Model instances are passed through unchanged."""
         from pydantic_ai import models
 
-        from pydantic_ai_claude_code import ClaudeCodeModel
-
         # Create a model instance
         original_model = ClaudeCodeModel("sonnet")
 
@@ -1797,44 +1508,6 @@ class TestRegistrationEdgeCases:
             logger.setLevel(original_level)
 
 
-class TestProviderAPIKeyFallback:
-    """Tests for API key fallback behavior."""
-
-    def test_provider_api_key_overrides_env(self):
-        """Test that provider_api_key overrides ANTHROPIC_AUTH_TOKEN."""
-        os.environ["ANTHROPIC_AUTH_TOKEN"] = "env-key"
-
-        try:
-            provider = ClaudeCodeProvider(
-                settings={
-                    "provider_preset": "deepseek",
-                    "provider_api_key": "explicit-key",
-                    "provider_override_env": True,
-                }
-            )
-
-            applied = provider.get_applied_env_vars()
-            assert applied.get("ANTHROPIC_AUTH_TOKEN") == "explicit-key"
-        finally:
-            os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
-    def test_provider_without_api_key_uses_preset_default(self):
-        """Test provider without explicit API key uses preset default field."""
-        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
-        provider = ClaudeCodeProvider(
-            settings={
-                "provider_preset": "deepseek",
-            }
-        )
-
-        # Should have preset but no API key set
-        assert provider.provider_preset is not None
-        applied = provider.get_applied_env_vars()
-        # ANTHROPIC_AUTH_TOKEN not set since no api_key provided
-        assert "ANTHROPIC_AUTH_TOKEN" not in applied or applied.get("ANTHROPIC_AUTH_TOKEN") is None
-
-
 class TestExactModelNamePassthrough:
     """Tests for exact model name pass-through."""
 
@@ -1842,25 +1515,21 @@ class TestExactModelNamePassthrough:
         """Test that exact model names are passed through with preset."""
         from pydantic_ai import models
 
-        from pydantic_ai_claude_code import ClaudeCodeModel
-
         # Using exact model name (not an alias)
         model = models.infer_model("claude-code:deepseek:DeepSeek-V3.2-Exp")
 
         assert isinstance(model, ClaudeCodeModel)
         # Should be returned unchanged since it's already exact
-        assert model._model_name == "DeepSeek-V3.2-Exp"
+        assert model._actual_model_name == "DeepSeek-V3.2-Exp"
 
     def test_exact_model_name_without_preset(self):
         """Test that exact model names work without preset."""
         from pydantic_ai import models
 
-        from pydantic_ai_claude_code import ClaudeCodeModel
-
         model = models.infer_model("claude-code:claude-3-5-sonnet-20241022")
 
         assert isinstance(model, ClaudeCodeModel)
-        assert model._model_name == "claude-3-5-sonnet-20241022"
+        assert model._model_alias == "claude-3-5-sonnet-20241022"
 
 
 class TestMinimalPresetConfiguration:
@@ -1906,50 +1575,44 @@ class TestMinimalPresetConfiguration:
         assert preset.get_model_name("unknown") == "unknown"
 
 
-class TestProviderContextManagerPreservesTempDir:
-    """Tests for provider context manager temp directory behavior."""
+class TestProviderBasics:
+    """Tests for basic ClaudeCodeProvider functionality."""
 
-    def test_context_manager_creates_temp_workspace(self):
-        """Test that context manager creates temp workspace."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "use_temp_workspace": True,
-            }
-        )
+    def test_provider_name(self):
+        """Test provider name property."""
+        provider = ClaudeCodeProvider()
+        assert provider.name == "claude-code"
 
-        assert provider.working_directory is None
+    def test_provider_repr(self):
+        """Test provider repr."""
+        provider = ClaudeCodeProvider()
+        assert "ClaudeCodeProvider" in repr(provider)
 
-        with provider as p:
-            assert p.working_directory is not None
-            temp_dir = p.working_directory
+    def test_provider_cli_path_property(self):
+        """Test provider cli_path property."""
+        provider = ClaudeCodeProvider(cli_path="/custom/cli")
+        assert provider.cli_path == "/custom/cli"
 
-        # Temp directory preserved after exit
-        assert Path(temp_dir).exists()
+    def test_provider_without_cli_path(self):
+        """Test provider without cli_path."""
+        provider = ClaudeCodeProvider()
+        assert provider.cli_path is None
 
-    def test_context_manager_without_temp_workspace(self):
-        """Test context manager without temp workspace."""
-        provider = ClaudeCodeProvider(
-            settings={
-                "use_temp_workspace": False,
-                "working_directory": None,
-            }
-        )
 
-        with provider as p:
-            # Should not create temp workspace
-            assert p._temp_dir is None
+class TestModelProperties:
+    """Tests for ClaudeCodeModel properties."""
 
-    def test_context_manager_with_explicit_directory(self):
-        """Test context manager with explicit working directory."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            provider = ClaudeCodeProvider(
-                settings={
-                    "working_directory": tmpdir,
-                    "use_temp_workspace": True,
-                }
-            )
+    def test_model_name_property_without_preset(self):
+        """Test model_name property without preset."""
+        model = ClaudeCodeModel("sonnet")
+        assert model.model_name == "claude-code:sonnet"
 
-            with provider as p:
-                # Should use explicit directory, not create temp
-                assert p.working_directory == tmpdir
-                assert p._temp_dir is None
+    def test_model_name_property_with_preset(self):
+        """Test model_name property with preset."""
+        model = ClaudeCodeModel("sonnet", provider_preset="deepseek")
+        assert model.model_name == "claude-code:deepseek:sonnet"
+
+    def test_system_property(self):
+        """Test system property."""
+        model = ClaudeCodeModel("sonnet")
+        assert model.system == "claude-code"

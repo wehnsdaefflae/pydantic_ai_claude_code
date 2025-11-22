@@ -7,21 +7,23 @@ including structured responses, tool calling, and streaming.
 Example:
     ```python
     from pydantic_ai import Agent
-    from pydantic_ai_claude_code import ClaudeCodeModel, ClaudeCodeProvider
 
-    # Create a provider with custom settings
-    provider = ClaudeCodeProvider(
-        working_directory="/path/to/project",
-        allowed_tools=["Read", "Edit", "Bash"],
-    )
-
-    # Create a model
-    model = ClaudeCodeModel("sonnet", provider=provider)
-
-    # Use with Pydantic AI Agent
-    agent = Agent(model)
+    # Simple usage with model string
+    agent = Agent(model='claude-code:sonnet')
     result = agent.run_sync("What is 2+2?")
     print(result.data)
+
+    # With provider preset (e.g., DeepSeek)
+    agent = Agent(model='claude-code:deepseek:sonnet')
+
+    # With hooks at run-time
+    result = await agent.run(
+        'Hello!',
+        model_settings={
+            'hooks': [{'matcher': {'event': 'tool_use'}, 'commands': ['echo $TOOL_NAME']}],
+            'working_directory': '/path/to/project',
+        }
+    )
     ```
 
 Error Handling:
@@ -60,6 +62,7 @@ from .provider_presets import (
     load_all_presets,
 )
 from .registration import register_claude_code_model
+from .tools import MCPTool
 from .types import ClaudeCodeSettings
 
 # Configure module-level logger
@@ -84,6 +87,7 @@ __all__ = [
     "ClaudeCodeProvider",
     "ClaudeCodeSettings",
     "ClaudeOAuthError",
+    "MCPTool",
     "ProviderPreset",
     "get_preset",
     "get_presets_by_category",

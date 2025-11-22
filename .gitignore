@@ -19,3 +19,7 @@ examples/.env
 report.md
 secrets/
 wheels/
+
+# Claude collective and task manager
+.claude-collective/
+.taskmaster/
