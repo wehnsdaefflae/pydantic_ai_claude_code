@@ -1,68 +1,79 @@
-"""Registration of Claude Code model with Pydantic AI."""
+"""Register claude-code provider with pydantic_ai.
+
+This module patches pydantic_ai's model inference to recognize
+'claude-code:*' model strings.
+
+Supported formats:
+- 'claude-code:sonnet' → Anthropic Claude Sonnet
+- 'claude-code:deepseek:sonnet' → DeepSeek via preset
+- 'claude-code:kimi:moonshot' → Kimi via preset
+"""
+
+from __future__ import annotations
 
 import logging
-import warnings
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from pydantic_ai.models import Model
+from pydantic_ai import models
 
 logger = logging.getLogger(__name__)
 
 
 def register_claude_code_model() -> None:
-    """Register claude-code provider with Pydantic AI's model inference.
+    """Register 'claude-code:*' model strings with pydantic_ai.
 
-    This patches pydantic_ai.models.infer_model to recognize 'claude-code:model_name'
-    strings and return a ClaudeCodeModel instance.
+    This patches pydantic_ai.models.infer_model to recognize model strings
+    that start with 'claude-code:' and create appropriate ClaudeCodeModel
+    instances.
 
-    After calling this (or importing pydantic_ai_claude_code), you can use:
-        Agent('claude-code:sonnet')
-    instead of:
-        Agent(ClaudeCodeModel('sonnet'))
+    Examples:
+        >>> register_claude_code_model()
+        >>> # Now you can use:
+        >>> agent = Agent(model='claude-code:sonnet')
+        >>> agent2 = Agent(model='claude-code:deepseek:sonnet')
     """
-    try:
-        from pydantic_ai import models
+    _original_infer = models.infer_model
 
-        # Save the original infer_model function
-        _original_infer_model = models.infer_model
+    def _patched_infer(model: models.Model | str) -> models.Model:
+        if isinstance(model, models.Model):
+            return model
 
-        def _patched_infer_model(model: "Model | str") -> "Model":
-            """Patched version of infer_model that supports claude-code provider."""
-            # If it's already a Model instance, just return it
-            if isinstance(model, models.Model):
-                return model
+        if isinstance(model, str) and model.startswith("claude-code:"):
+            # Import here to avoid circular dependency
+            from .provider import ClaudeCodeProvider
 
-            # Check if it's a claude-code provider string
-            if isinstance(model, str):
-                try:
-                    provider, model_name = model.split(":", maxsplit=1)
-                    if provider == "claude-code":
-                        from .model import ClaudeCodeModel
+            parts = model.split(":", 2)
+            provider = ClaudeCodeProvider()
 
-                        logger.debug(
-                            "Creating ClaudeCodeModel for model: %s", model_name
-                        )
-                        return ClaudeCodeModel(model_name)
-                except ValueError:
-                    # Not a provider:model format, fall through to original
-                    pass
+            if len(parts) == 2:
+                # Format: claude-code:model_name
+                model_name = parts[1]
+                if not model_name:
+                    raise ValueError(
+                        f"Invalid model string '{model}': model name cannot be empty"
+                    )
+                logger.debug("Creating ClaudeCodeModel with model_name=%s", model_name)
+                return provider.create_model(model_name)
 
-            # Fall back to original implementation
-            return _original_infer_model(model)
+            elif len(parts) == 3:
+                # Format: claude-code:preset:model_name
+                provider_preset = parts[1]
+                model_name = parts[2]
+                if not provider_preset:
+                    raise ValueError(
+                        f"Invalid model string '{model}': preset cannot be empty"
+                    )
+                if not model_name:
+                    raise ValueError(
+                        f"Invalid model string '{model}': model name cannot be empty"
+                    )
+                logger.debug(
+                    "Creating ClaudeCodeModel with preset=%s, model_name=%s",
+                    provider_preset,
+                    model_name,
+                )
+                return provider.create_model(model_name, provider_preset=provider_preset)
 
-        # Replace the function
-        models.infer_model = _patched_infer_model
-        logger.info(
-            "Successfully registered claude-code model provider with Pydantic AI"
-        )
+        return _original_infer(model)
 
-    except ImportError as e:
-        # pydantic_ai not installed, skip registration
-        logger.warning("Failed to register claude-code provider: %s", e)
-        warnings.warn(
-            "pydantic_ai not found - claude-code provider not registered. "
-            "Install pydantic-ai to use 'claude-code:model' strings.",
-            ImportWarning,
-            stacklevel=2,
-        )
+    models.infer_model = _patched_infer
+    logger.info("Registered claude-code model provider")

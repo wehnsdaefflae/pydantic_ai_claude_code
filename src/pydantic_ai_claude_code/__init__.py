@@ -7,21 +7,23 @@ including structured responses, tool calling, and streaming.
 Example:
     ```python
     from pydantic_ai import Agent
-    from pydantic_ai_claude_code import ClaudeCodeModel, ClaudeCodeProvider
 
-    # Create a provider with custom settings
-    provider = ClaudeCodeProvider(
-        working_directory="/path/to/project",
-        allowed_tools=["Read", "Edit", "Bash"],
-    )
-
-    # Create a model
-    model = ClaudeCodeModel("sonnet", provider=provider)
-
-    # Use with Pydantic AI Agent
-    agent = Agent(model)
+    # Simple usage with model string
+    agent = Agent(model='claude-code:sonnet')
     result = agent.run_sync("What is 2+2?")
     print(result.data)
+
+    # With provider preset (e.g., DeepSeek)
+    agent = Agent(model='claude-code:deepseek:sonnet')
+
+    # With hooks at run-time
+    result = await agent.run(
+        'Hello!',
+        model_settings={
+            'hooks': [{'matcher': {'event': 'tool_use'}, 'commands': ['echo $TOOL_NAME']}],
+            'working_directory': '/path/to/project',
+        }
+    )
     ```
 
 Error Handling:
@@ -52,7 +54,15 @@ import logging
 from .exceptions import ClaudeOAuthError
 from .model import ClaudeCodeModel
 from .provider import ClaudeCodeProvider
+from .provider_presets import (
+    ProviderPreset,
+    get_preset,
+    get_presets_by_category,
+    list_presets,
+    load_all_presets,
+)
 from .registration import register_claude_code_model
+from .tools import MCPTool
 from .types import ClaudeCodeSettings
 
 # Import new modular components for convenient access
@@ -92,16 +102,10 @@ __all__ = [
     "ClaudeCodeProvider",
     "ClaudeCodeSettings",
     "ClaudeOAuthError",
-    # Core functions
-    "detect_oauth_error",
-    "detect_rate_limit",
-    "calculate_wait_time",
-    "detect_cli_infrastructure_failure",
-    # Structured output
-    "write_structure_to_filesystem",
-    "read_structure_from_filesystem",
-    "build_structure_instructions",
-    # Transport
-    "EnhancedCLITransport",
-    "convert_settings_to_sdk_options",
+    "MCPTool",
+    "ProviderPreset",
+    "get_preset",
+    "get_presets_by_category",
+    "list_presets",
+    "load_all_presets",
 ]
