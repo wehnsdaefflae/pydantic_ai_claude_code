@@ -5,6 +5,8 @@ unstructured outputs that the Claude Agent SDK doesn't have.
 """
 
 import logging
+import os
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
@@ -17,24 +19,33 @@ logger = logging.getLogger(__name__)
 
 def create_structured_output_path() -> str:
     """
-    Create a unique temporary directory path for structured output.
-    
+    Create a unique temporary directory path for storing structured output.
+
     Returns:
-        A path string in /tmp of the form 'claude_data_structure_<8-hex-id>'.
+        str: Path string of a secure temporary directory
     """
-    unique_id = uuid.uuid4().hex[:8]
-    return f"/tmp/claude_data_structure_{unique_id}"
+    # Use tempfile.mkdtemp for secure temporary directory creation
+    temp_dir = tempfile.mkdtemp(prefix="claude_data_structure_")
+    logger.debug("Created secure temp directory: %s", temp_dir)
+    return temp_dir
 
 
 def create_unstructured_output_path() -> str:
     """
-    Create a filesystem path for a temporary unstructured output file in /tmp with a short unique identifier.
-    
+    Generate a unique temporary file path for unstructured output.
+
     Returns:
-        file_path (str): Path to the temporary unstructured output file (e.g. `/tmp/claude_unstructured_output_<id>.txt`).
+        A path string for a secure temporary unstructured output file.
     """
-    unique_id = uuid.uuid4().hex[:8]
-    return f"/tmp/claude_unstructured_output_{unique_id}.txt"
+    # Use tempfile.mkstemp for secure temporary file creation
+    fd, temp_path = tempfile.mkstemp(
+        prefix="claude_unstructured_output_",
+        suffix=".txt"
+    )
+    # Close the file descriptor since we just need the path
+    os.close(fd)
+    logger.debug("Created secure temp file: %s", temp_path)
+    return temp_path
 
 
 def read_structured_output(
@@ -42,17 +53,17 @@ def read_structured_output(
     output_dir: str,
 ) -> dict[str, Any]:
     """
-    Assemble structured data from files in a directory according to the provided schema.
-    
+    Assemble a dictionary by reading files in output_dir according to the provided schema.
+
     Parameters:
-        schema (dict[str, Any]): Schema describing the expected file/directory structure and types.
-        output_dir (str): Path to the directory containing files and subdirectories to read.
-    
+        schema (dict[str, Any]): JSON schema describing the expected file/folder structure and types.
+        output_dir (str): Path to the directory containing the files and/or subdirectories that represent the structured output.
+
     Returns:
-        dict[str, Any]: Assembled data dictionary matching the schema.
-    
+        dict[str, Any]: The assembled data matching the schema.
+
     Raises:
-        RuntimeError: If the specified output directory does not exist.
+        RuntimeError: If the output directory does not exist.
     """
     output_path = Path(output_dir)
 
@@ -66,16 +77,17 @@ def read_structured_output(
 
 
 def read_unstructured_output(output_file: str) -> str:
-    """Read unstructured output from file.
-
-    Args:
-        output_file: Path to the output file
-
+    """
+    Read unstructured output from the given file.
+    
+    Parameters:
+        output_file (str): Path to the unstructured output file.
+    
     Returns:
-        Content of the output file
-
+        The file's contents as a string.
+    
     Raises:
-        RuntimeError: If file doesn't exist
+        RuntimeError: If the file does not exist.
     """
     output_path = Path(output_file)
 
@@ -93,18 +105,16 @@ def read_unstructured_output(output_file: str) -> str:
 
 def cleanup_output_file(output_path: str) -> None:
     """
-    Remove a file or directory tree at the given path.
-    
+    Remove a temporary file or directory at the given path.
+
+    If the path refers to a directory, it is removed recursively; if it refers to a file, the file is deleted. Any errors encountered during cleanup are logged and not raised.
+
     Parameters:
-        output_path (str): Path to the file or directory to remove. If the path is a directory, its entire tree will be deleted.
-    
-    Notes:
-        Exceptions raised during removal are caught and logged; this function does not propagate errors.
+        output_path (str): Path to the temporary file or directory to remove.
     """
     path = Path(output_path)
     try:
         if path.is_dir():
-            import shutil
             shutil.rmtree(path)
             logger.debug("Cleaned up output directory: %s", output_path)
         elif path.exists():

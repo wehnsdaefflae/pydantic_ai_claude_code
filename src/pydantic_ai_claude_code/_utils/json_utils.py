@@ -12,15 +12,14 @@ logger = logging.getLogger(__name__)
 
 
 def strip_markdown_code_fence(text: str) -> str:
-    """Remove markdown code fence markers from text.
-
-    Strips ```json, ```, and trailing ``` from text before parsing.
-
-    Args:
-        text: Text potentially wrapped in markdown code fences
-
+    """
+    Remove surrounding Markdown code fence markers and return the inner content.
+    
+    Parameters:
+        text (str): Input text that may be wrapped with Markdown code fences (for example, ```json ... ```).
+    
     Returns:
-        Cleaned text with code fences removed
+        str: The input text with surrounding code fence markers removed and leading/trailing whitespace trimmed.
     """
     cleaned = text.strip()
 
@@ -39,16 +38,19 @@ def strip_markdown_code_fence(text: str) -> str:
 
 def extract_json_from_text(text: str, schema: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """
-    Extract a JSON object from a text string using fallback strategies.
-    
-    Attempts direct parsing after removing Markdown code fences. If parsing fails, attempts to locate a JSON object between the first '{' and the last '}' in the input. If those attempts fail and a schema with exactly one property is provided, returns a dict mapping that single property name to the cleaned text.
-    
+    Extract a JSON object from a text blob using multiple fallback strategies.
+
+    Attempts, in order:
+    1) Parse the text after removing markdown code fences.
+    2) Locate and parse a JSON object substring delimited by the first '{' and last '}'.
+    3) If a JSON Schema-like `schema` with exactly one property is provided, return a dict mapping that property name to the cleaned text.
+
     Parameters:
-        text (str): Input text that may contain a JSON object.
-        schema (dict[str, Any] | None): Optional JSON Schema; if it defines exactly one property, that property's name will be used as the key when wrapping a simple response.
-    
+        text (str): Input text that may contain JSON or plain content.
+        schema (dict[str, Any] | None): Optional schema guiding extraction. If provided and it contains a single property under the "properties" key, the cleaned text will be returned wrapped as the value for that property.
+
     Returns:
-        dict[str, Any] | None: Parsed JSON dictionary on success, `None` if extraction fails.
+        dict[str, Any] | None: The parsed JSON object on success, or `None` if no valid extraction could be made.
     """
     # Strategy 1: Direct parse after stripping markdown
     cleaned = strip_markdown_code_fence(text)

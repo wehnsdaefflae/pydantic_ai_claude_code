@@ -64,15 +64,12 @@ def resolve_sandbox_runtime_path(settings: dict[str, Any] | None = None) -> str:
 
 def build_sandbox_config() -> dict[str, Any]:
     """
-    Create a sandbox configuration dictionary for running Claude with restricted permissions.
-    
-    The configuration contains a top-level "permissions" key whose "allow" list grants:
-    - Bash execution
-    - Read, write, and edit access under /tmp
-    - WebFetch access to api.anthropic.com
-    
+    Create the sandbox permissions configuration used when running Claude in the sandbox.
+
+    The configuration includes an ordered list of allowed permission strings (e.g., shell access, read/write/edit to /tmp, and WebFetch access to api.anthropic.com).
+
     Returns:
-        dict: Sandbox configuration with a "permissions" → "allow" list of permission strings.
+        sandbox_config (dict[str, Any]): A dict with a "permissions" key whose "allow" value is a list of permission specifiers.
     """
     return {
         "permissions": {
@@ -90,18 +87,19 @@ def build_sandbox_config() -> dict[str, Any]:
 def wrap_command_with_sandbox(
     cmd: list[str],
     settings: dict[str, Any] | None = None
-) -> tuple[list[str], dict[str, str]]:
+) -> tuple[list[str], dict[str, str], str]:
     """
-    Wrap a Claude CLI command with the sandbox runtime and prepare sandboxed environment variables.
-    
+    Wrap a Claude CLI command so it runs under the sandbox-runtime with a sandboxed configuration and environment.
+
     Parameters:
-        cmd (list[str]): Original Claude CLI command as a list of arguments.
-        settings (dict[str, Any] | None): Optional settings; may include `sandbox_runtime_path` to override the sandbox runtime binary location.
-    
+        cmd (list[str]): The original Claude CLI command and its arguments.
+        settings (dict[str, Any] | None): Optional settings; if it contains `sandbox_runtime_path` that path is used to locate the sandbox runtime.
+
     Returns:
-        tuple[list[str], dict[str, str]]: 
-            - wrapped_command: The command list that launches the sandbox runtime with the provided settings file and the original command.
-            - environment_vars: Environment variables to apply when running the wrapped command (e.g., `IS_SANDBOX` and `CLAUDE_CONFIG_DIR`).
+        tuple[list[str], dict[str, str], str]: A tuple containing:
+            - wrapped_cmd: The wrapped command invoking the sandbox runtime
+            - sandbox_env: Environment dictionary for the sandbox (includes `IS_SANDBOX` and `CLAUDE_CONFIG_DIR`)
+            - config_path: Path to the temporary config file (caller must clean up after process exits)
     """
     settings = settings or {}
     srt_path = resolve_sandbox_runtime_path(settings)
@@ -116,7 +114,7 @@ def wrap_command_with_sandbox(
             json.dump(config, f)
 
         # Redirect Claude config/debug to /tmp to avoid ~/.claude/ writes
-        claude_config_dir = "/tmp/claude_sandbox_config"
+        claude_config_dir = "/tmp/claude_sandbox_config"  # noqa: S108
         os.makedirs(claude_config_dir, exist_ok=True)
 
         # Copy OAuth credentials from ~/.claude/ to sandbox config dir
@@ -134,11 +132,7 @@ def wrap_command_with_sandbox(
             logger.debug("Copied settings to sandbox config dir")
 
         # Build wrapper: srt -- <claude command>
-        wrapped_cmd = [
-            srt_path,
-            "--settings", config_path,
-            "--",
-        ] + cmd
+        wrapped_cmd = [srt_path, "--settings", config_path, "--", *cmd]
 
         # Environment variables for sandbox
         sandbox_env = {
@@ -149,12 +143,12 @@ def wrap_command_with_sandbox(
         logger.info("Wrapped Claude command with sandbox (IS_SANDBOX=1, CLAUDE_CONFIG_DIR=%s)", claude_config_dir)
         logger.debug("Full sandboxed command: %s", " ".join(wrapped_cmd))
 
-        return wrapped_cmd, sandbox_env
+        return wrapped_cmd, sandbox_env, config_path
 
     except Exception:
         # Clean up config file on error
         try:
             os.unlink(config_path)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         raise

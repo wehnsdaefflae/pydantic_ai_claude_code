@@ -3,7 +3,7 @@
 import json
 import os
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch, mock_open
 
@@ -141,9 +141,12 @@ class TestRetryLogic:
 
     def test_calculate_wait_time_future_time(self):
         """Test calculating wait time for future reset time."""
-        now = datetime.now()
-        future_hour = (now + timedelta(hours=2)).hour
-        
+        # Use UTC to match the implementation
+        now = datetime.now(timezone.utc)
+        # Get an hour that's at least 2 hours in the future
+        future_datetime = now + timedelta(hours=2)
+        future_hour = future_datetime.hour
+
         # Convert to 12-hour format with AM/PM
         if future_hour == 0:
             reset_time_str = "12AM"
@@ -153,17 +156,25 @@ class TestRetryLogic:
             reset_time_str = "12PM"
         else:
             reset_time_str = f"{future_hour - 12}PM"
-        
+
         wait_seconds = calculate_wait_time(reset_time_str)
-        
-        # Should be between 2 hours and 2 hours + 1 minute (buffer)
-        assert 7200 <= wait_seconds <= 7260
+
+        # The function resets minutes/seconds to 0, so the wait time depends on current time
+        # Calculate expected: from now to the top of future_hour, plus 1 minute buffer
+        expected_reset = now.replace(hour=future_hour, minute=0, second=0, microsecond=0)
+        if expected_reset < now:
+            expected_reset += timedelta(days=1)
+        expected_wait = int((expected_reset - now).total_seconds()) + 60  # +60 for 1-min buffer
+
+        # Allow some tolerance for test execution time (±5 seconds)
+        assert abs(wait_seconds - expected_wait) <= 5
 
     def test_calculate_wait_time_past_time_same_day(self):
         """Test that past time adds a day."""
-        now = datetime.now()
+        # Use UTC to match the implementation
+        now = datetime.now(timezone.utc)
         past_hour = (now - timedelta(hours=2)).hour
-        
+
         # Convert to 12-hour format
         if past_hour == 0:
             reset_time_str = "12AM"
@@ -173,11 +184,19 @@ class TestRetryLogic:
             reset_time_str = "12PM"
         else:
             reset_time_str = f"{past_hour - 12}PM"
-        
+
         wait_seconds = calculate_wait_time(reset_time_str)
-        
-        # Should be close to 22 hours (24 - 2) + buffer
-        assert wait_seconds > 79200  # More than 22 hours
+
+        # Calculate expected: should be tomorrow at past_hour:00
+        expected_reset = now.replace(hour=past_hour, minute=0, second=0, microsecond=0)
+        if expected_reset < now:
+            expected_reset += timedelta(days=1)
+        expected_wait = int((expected_reset - now).total_seconds()) + 60  # +60 for 1-min buffer
+
+        # Should be at least 21 hours (allowing for minute variations)
+        assert wait_seconds >= 75600  # At least 21 hours
+        # Verify it's close to expected
+        assert abs(wait_seconds - expected_wait) <= 5
 
     def test_calculate_wait_time_invalid_format(self):
         """Test fallback for invalid time format."""
@@ -368,28 +387,31 @@ class TestSandboxRuntime:
         """Test wrapping command with sandbox."""
         cmd = ["claude", "--print"]
         settings = {"sandbox_runtime_path": "/usr/bin/srt"}
-        
+
         with patch("tempfile.mkstemp", return_value=(99, "/tmp/config.json")):
             with patch("os.fdopen", mock_open()):
                 with patch("os.makedirs"):
-                    wrapped_cmd, env = wrap_command_with_sandbox(cmd, settings)
-        
+                    with patch("shutil.copy2"):  # Mock file copy operations
+                        wrapped_cmd, env, config_path = wrap_command_with_sandbox(cmd, settings)
+
         assert wrapped_cmd[0] == "/usr/bin/srt"
         assert "--settings" in wrapped_cmd
         assert "--" in wrapped_cmd
         assert "claude" in wrapped_cmd
         assert env["IS_SANDBOX"] == "1"
         assert "CLAUDE_CONFIG_DIR" in env
+        assert config_path == "/tmp/config.json"
 
     def test_wrap_command_with_sandbox_preserves_args(self):
         """Test that original command arguments are preserved."""
         cmd = ["claude", "--print", "--model", "sonnet", "test.md"]
         settings = {"sandbox_runtime_path": "/usr/bin/srt"}
-        
+
         with patch("tempfile.mkstemp", return_value=(99, "/tmp/config.json")):
             with patch("os.fdopen", mock_open()):
                 with patch("os.makedirs"):
-                    wrapped_cmd, _ = wrap_command_with_sandbox(cmd, settings)
+                    with patch("shutil.copy2"):  # Mock file copy operations
+                        wrapped_cmd, _, _ = wrap_command_with_sandbox(cmd, settings)
         
         # Find the position of "--" separator
         separator_idx = wrapped_cmd.index("--")
@@ -414,7 +436,7 @@ class TestSandboxRuntime:
                 with patch("pydantic_ai_claude_code.core.sandbox_runtime.Path.home", return_value=tmp_path / "home"):
                     with patch("os.makedirs"):
                         with patch("shutil.copy2") as mock_copy:
-                            _, env = wrap_command_with_sandbox(cmd, settings)
-                            
+                            _, env, _ = wrap_command_with_sandbox(cmd, settings)
+
                             # Should have attempted to copy credentials
                             assert mock_copy.called
