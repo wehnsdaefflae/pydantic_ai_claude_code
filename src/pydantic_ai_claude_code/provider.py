@@ -7,6 +7,11 @@ from typing import Any, cast
 
 from typing_extensions import Self
 
+from .provider_presets import (
+    ProviderPreset,
+    apply_provider_environment,
+    get_preset,
+)
 from .types import ClaudeCodeSettings
 
 logger = logging.getLogger(__name__)
@@ -21,28 +26,57 @@ class ClaudeCodeProvider:
     """
 
     def __init__(self, settings: ClaudeCodeSettings | None = None):
-        """Initialize Claude Code provider.
+        """
+        Initialize the Claude Code provider and apply configuration and provider preset environment variables.
 
-        Args:
-            settings: Configuration dict. Supported keys:
-                - working_directory: Directory for Claude to operate in
-                - allowed_tools: List of tool names to allow
-                - disallowed_tools: List of tool names to disallow
-                - append_system_prompt: Additional system prompt to append
-                - permission_mode: Permission mode ("acceptEdits", "bypassPermissions", "default", "plan")
-                - model: Model to use (e.g., "sonnet", "opus")
-                - fallback_model: Fallback model when primary is overloaded
-                - verbose: Enable verbose output (default: False)
-                - dangerously_skip_permissions: Skip permission checks (default: True)
-                - use_temp_workspace: Create temporary workspace (default: True)
-                - retry_on_rate_limit: Auto-retry on rate limits (default: True)
-                - timeout_seconds: Subprocess timeout in seconds (default: 900)
-                - claude_cli_path: Path to claude CLI binary (auto-resolved if not provided)
-                - extra_cli_args: Additional CLI arguments to pass through (e.g., ["--debug", "--mcp-config", "config.json"])
-                - use_sandbox_runtime: Enable sandbox-runtime wrapping with IS_SANDBOX=1 (default: True)
-                - sandbox_runtime_path: Path to srt binary (auto-resolved if not provided)
+        Parameters:
+            settings (ClaudeCodeSettings | None): Optional configuration mapping. Recognized keys include common runtime settings (working_directory, allowed_tools, disallowed_tools, append_system_prompt, permission_mode, model, fallback_model, verbose, timeout_seconds, claude_cli_path, extra_cli_args) and flags controlling behavior:
+                - use_temp_workspace: create a temporary working directory when no working_directory is provided
+                - dangerously_skip_permissions: bypass permission checks
+                - retry_on_rate_limit: enable automatic retries on rate limits
+                - use_sandbox_runtime / sandbox_runtime_path: wrap execution with a sandbox runtime
+                - provider_preset: identifier of a provider preset to load
+                - provider_api_key: API key to supply to the provider preset
+                - provider_template_vars: template variable values to apply to the preset
+                - provider_override_env: if true, override existing environment variables when applying the preset
+
+        Warning:
+            If a provider_preset is specified, this constructor modifies the global ``os.environ``
+            dictionary by setting environment variables from the preset (e.g., ANTHROPIC_BASE_URL).
+            These changes persist for the lifetime of the process and may affect other code.
+            Use ``get_applied_env_vars()`` to see which variables were set.
+
+        Notes:
+            If a provider_preset is specified and found, its environment variables are applied and stored internally; if not found, a warning is logged.
         """
         config = settings or {}
+
+        # Load provider preset if specified
+        self.provider_preset_id = config.get("provider_preset")
+        self.provider_preset: ProviderPreset | None = None
+        self._applied_env_vars: dict[str, str] = {}
+
+        if self.provider_preset_id:
+            self.provider_preset = get_preset(self.provider_preset_id)
+            if self.provider_preset:
+                # Apply provider environment variables
+                self._applied_env_vars = apply_provider_environment(
+                    self.provider_preset,
+                    api_key=config.get("provider_api_key"),
+                    template_vars=config.get("provider_template_vars"),
+                    override_existing=config.get("provider_override_env", False),
+                )
+                logger.info(
+                    "Applied provider preset '%s' with %d environment variables",
+                    self.provider_preset_id,
+                    len(self._applied_env_vars),
+                )
+            else:
+                logger.warning(
+                    "Provider preset '%s' not found. "
+                    "Available presets can be listed with list_presets()",
+                    self.provider_preset_id,
+                )
 
         self.working_directory = config.get("working_directory")
         self.allowed_tools = config.get("allowed_tools")
@@ -66,7 +100,7 @@ class ClaudeCodeProvider:
             "Initialized ClaudeCodeProvider with model=%s, "
             "working_directory=%s, use_temp_workspace=%s, "
             "dangerously_skip_permissions=%s, retry_on_rate_limit=%s, timeout_seconds=%s, "
-            "claude_cli_path=%s, use_sandbox_runtime=%s",
+            "claude_cli_path=%s, use_sandbox_runtime=%s, provider_preset=%s",
             self.model,
             self.working_directory,
             self.use_temp_workspace,
@@ -75,10 +109,41 @@ class ClaudeCodeProvider:
             self.timeout_seconds,
             self.claude_cli_path,
             self.use_sandbox_runtime,
+            self.provider_preset_id,
         )
 
+    def get_model_name(self, model_alias: str) -> str:
+        """
+        Return the provider-specific model name for a given alias.
+        
+        If a provider preset is loaded, returns the preset's mapping for the alias; otherwise returns the alias unchanged.
+        
+        Args:
+            model_alias: Model alias (e.g., "sonnet", "haiku", "opus", "custom")
+        
+        Returns:
+            The actual model name to use, or the original `model_alias` if no preset mapping exists.
+        """
+        if self.provider_preset:
+            return self.provider_preset.get_model_name(model_alias)
+        return model_alias
+
+    def get_applied_env_vars(self) -> dict[str, str]:
+        """
+        Provide a copy of environment variables applied from the active provider preset.
+        
+        Returns:
+            dict[str, str]: Mapping of environment variable names to their applied values.
+        """
+        return self._applied_env_vars.copy()
+
     def __enter__(self) -> Self:
-        """Context manager entry - creates temp directory if needed."""
+        """
+        Prepare the provider for context usage by creating and assigning a temporary working directory when configured to use a temp workspace.
+        
+        Returns:
+            self: The provider instance with `working_directory` set to the temporary path if one was created.
+        """
         if self.use_temp_workspace and self.working_directory is None:
             self._temp_dir = Path(tempfile.mkdtemp(prefix="claude_code_"))
             self.working_directory = str(self._temp_dir)
