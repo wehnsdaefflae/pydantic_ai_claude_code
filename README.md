@@ -393,6 +393,57 @@ See the `examples/` directory for more demonstrations:
 - `binary_content_example.py` - Standard interface for images, PDFs, and binary files
 - `additional_files_example.py` - Providing local files for analysis (Claude Code-specific)
 
+## Recent Improvements
+
+### Thread-Safe Debug Logging (v0.8.2)
+
+Debug file counter is now thread-safe for concurrent request handling:
+- Uses `threading.Lock` to prevent race conditions
+- Ensures prompt-response pairs are correctly matched even with concurrent requests
+- Stores counter in settings dict for reliable pairing across threads
+
+### Security Enhancements (v0.8.2)
+
+- **Secure Temp Files**: Using Python's `tempfile` module for atomic, secure temporary file creation
+- **Boolean Handling**: Proper parsing of "false", "0", "no" values
+- **Timezone Awareness**: Consistent UTC timezone usage for rate limit calculations
+- **Session ID Forwarding**: Proper session persistence in SDK transport mode
+
+All improvements maintain full backward compatibility.
+
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
+
+- Development setup instructions
+- Code quality standards (ruff, mypy, pylint)
+- Testing guidelines
+- Pull request process
+- Commit message conventions
+
+### Quick Start for Contributors
+
+```bash
+# Clone and setup
+git clone https://github.com/wehnsdaefflae/pydantic_ai_claude_code.git
+cd pydantic_ai_claude_code
+uv venv && source .venv/bin/activate
+uv pip install -e .
+uv pip install pytest pytest-asyncio ruff mypy pylint
+
+# Install sandbox-runtime
+npm install -g @anthropic-ai/sandbox-runtime
+
+# Run tests
+pytest tests/ -v
+
+# Check code quality
+ruff check .
+mypy src/pydantic_ai_claude_code
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
 ## License
 
 MIT License
