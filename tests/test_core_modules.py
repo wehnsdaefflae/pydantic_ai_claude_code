@@ -334,9 +334,167 @@ class TestDebugSaver:
         """Test that no error occurs when response path not configured."""
         settings = {}
         response = {"data": "test"}
-        
+
         # Should not raise an error
         save_raw_response_to_working_dir(response, settings)
+
+    def test_debug_counter_stores_in_settings(self, tmp_path):
+        """Test that save_prompt_debug stores counter in settings."""
+        debug_dir = tmp_path / "debug"
+        settings = {"debug_save_prompts": str(debug_dir)}
+
+        save_prompt_debug("test prompt", settings)
+
+        # Counter should be stored in settings
+        assert "__debug_counter" in settings
+        assert isinstance(settings["__debug_counter"], int)
+        assert settings["__debug_counter"] > 0
+
+    def test_debug_counter_pairing(self, tmp_path):
+        """Test that prompt and response use the same counter value."""
+        debug_dir = tmp_path / "debug"
+        settings = {"debug_save_prompts": str(debug_dir)}
+
+        # Save prompt and response
+        save_prompt_debug("test prompt", settings)
+        counter_after_prompt = settings["__debug_counter"]
+        save_response_debug({"result": "test"}, settings)
+
+        # Both files should have the same counter prefix
+        prompt_files = list(debug_dir.glob("*_prompt.md"))
+        response_files = list(debug_dir.glob("*_response.json"))
+
+        assert len(prompt_files) == 1
+        assert len(response_files) == 1
+
+        # Extract counter from filenames
+        prompt_counter = prompt_files[0].name.split("_")[0]
+        response_counter = response_files[0].name.split("_")[0]
+
+        assert prompt_counter == response_counter
+        assert prompt_counter == f"{counter_after_prompt:03d}"
+
+    def test_debug_counter_thread_safety(self, tmp_path):
+        """Test that debug counter is thread-safe in concurrent scenarios."""
+        import threading
+        import time
+
+        debug_dir = tmp_path / "debug"
+        base_settings = {"debug_save_prompts": str(debug_dir)}
+
+        results = []
+        errors = []
+
+        def worker(thread_id):
+            try:
+                # Each thread gets its own settings dict (simulating separate requests)
+                settings = base_settings.copy()
+
+                # Save prompt
+                save_prompt_debug(f"Prompt from thread {thread_id}", settings)
+
+                # Get the counter assigned to this thread
+                counter = settings.get("__debug_counter")
+
+                # Small delay to increase chance of race condition if code is broken
+                time.sleep(0.001)
+
+                # Save response
+                save_response_debug({"thread_id": thread_id, "result": "success"}, settings)
+
+                results.append({
+                    "thread_id": thread_id,
+                    "counter": counter,
+                    "settings_counter": settings.get("__debug_counter")
+                })
+            except Exception as e:
+                errors.append({"thread_id": thread_id, "error": str(e)})
+
+        # Create and start 10 threads
+        threads = []
+        for i in range(10):
+            thread = threading.Thread(target=worker, args=(i,))
+            threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        # Should be no errors
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+
+        # All threads should have completed
+        assert len(results) == 10
+
+        # All counters should be unique
+        counters = [r["counter"] for r in results]
+        assert len(set(counters)) == 10, "Counters are not unique!"
+
+        # Check that files were created correctly
+        prompt_files = sorted(debug_dir.glob("*_prompt.md"))
+        response_files = sorted(debug_dir.glob("*_response.json"))
+
+        assert len(prompt_files) == 10
+        assert len(response_files) == 10
+
+        # For each thread, verify prompt and response have matching counters
+        for result in results:
+            thread_id = result["thread_id"]
+            counter = result["counter"]
+            counter_str = f"{counter:03d}"
+
+            # Find files for this counter
+            thread_prompts = [f for f in prompt_files if f.name.startswith(counter_str)]
+            thread_responses = [f for f in response_files if f.name.startswith(counter_str)]
+
+            assert len(thread_prompts) == 1, f"Thread {thread_id} should have exactly 1 prompt file"
+            assert len(thread_responses) == 1, f"Thread {thread_id} should have exactly 1 response file"
+
+            # Verify content matches
+            prompt_content = thread_prompts[0].read_text()
+            assert f"thread {thread_id}" in prompt_content
+
+            response_content = json.loads(thread_responses[0].read_text())
+            assert response_content["thread_id"] == thread_id
+
+    def test_debug_counter_no_race_condition(self, tmp_path):
+        """Test that concurrent calls don't cause counter collisions."""
+        import threading
+
+        debug_dir = tmp_path / "debug"
+        base_settings = {"debug_save_prompts": str(debug_dir)}
+
+        assigned_counters = []
+        counter_lock = threading.Lock()
+
+        def worker(thread_id):
+            settings = base_settings.copy()
+            save_prompt_debug(f"Prompt {thread_id}", settings)
+
+            # Record the counter that was assigned
+            with counter_lock:
+                assigned_counters.append(settings["__debug_counter"])
+
+        # Run many threads concurrently
+        threads = []
+        for i in range(50):
+            thread = threading.Thread(target=worker, args=(i,))
+            threads.append(thread)
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        # All 50 counters should be unique (no collisions)
+        assert len(assigned_counters) == 50
+        assert len(set(assigned_counters)) == 50, "Counter collision detected!"
+
+        # Counters should be consecutive (the specific range doesn't matter,
+        # just that they're consecutive with no gaps)
+        sorted_counters = sorted(assigned_counters)
+        expected_range = set(range(sorted_counters[0], sorted_counters[0] + 50))
+        assert set(assigned_counters) == expected_range
 
 
 class TestSandboxRuntime:
