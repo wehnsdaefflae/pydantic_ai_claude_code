@@ -6,20 +6,20 @@ infrastructure failures that the Claude Agent SDK doesn't provide.
 
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
 
 def detect_rate_limit(error_output: str) -> tuple[bool, str | None]:
     """
-    Detects a rate-limit condition in combined Claude CLI output and extracts the reported reset time.
-    
+    Detect whether the CLI output indicates a rate limit and extract the suggested reset time.
+
     Parameters:
-        error_output (str): Combined stdout and stderr text from the Claude CLI.
-    
+        error_output (str): Combined stdout and stderr from the Claude CLI.
+
     Returns:
-        tuple[bool, str | None]: (True, reset_time_str) when a reset time like '3PM' is found; (False, None) otherwise.
+        tuple: (is_rate_limited, reset_time_str) where `is_rate_limited` is `True` if a rate-limit pattern was found, `False` otherwise, and `reset_time_str` is the extracted reset time (e.g., "3PM") or `None` if not present.
     """
     # Pattern matches: "limit reached.*resets 3PM" or similar
     rate_limit_match = re.search(
@@ -36,16 +36,17 @@ def detect_rate_limit(error_output: str) -> tuple[bool, str | None]:
 
 def calculate_wait_time(reset_time_str: str) -> int:
     """
-    Compute how many seconds to wait until the provided 12-hour reset time, including a 1-minute buffer.
-    
+    Compute the number of seconds to wait until the given 12-hour reset time, including a 1-minute buffer.
+
     Parameters:
-        reset_time_str (str): Reset time in 12-hour format with AM/PM (examples: "3PM", "11AM").
-    
+        reset_time_str (str): Reset time in 12-hour format (e.g., "3PM", "11AM"). If the parsed time is earlier than the current time, it is treated as occurring on the next day.
+
     Returns:
-        int: Number of seconds to wait until the reset time plus a 1-minute buffer. If the parsed reset time is earlier than now, the function treats it as occurring the next day. If parsing fails, returns 300 (5 minutes) as a fallback.
+        int: Non-negative number of seconds to wait until the reset time plus a 1-minute buffer. If the input cannot be parsed, returns 300 (5 minutes) as a fallback.
     """
     try:
-        now = datetime.now()
+        # Use UTC for consistent timezone handling
+        now = datetime.now(timezone.utc)
         # Parse time like "3PM" or "11AM"
         reset_time_obj = datetime.strptime(reset_time_str, "%I%p")
         reset_datetime = now.replace(
@@ -84,13 +85,13 @@ def calculate_wait_time(reset_time_str: str) -> int:
 
 def detect_cli_infrastructure_failure(stderr: str) -> bool:
     """
-    Detects whether Claude CLI stderr contains a retryable infrastructure failure.
-    
+    Detects transient Claude CLI infrastructure failures that should trigger a retry.
+
     Parameters:
-        stderr (str): Error output from the Claude CLI.
-    
+        stderr (str): Standard error output from the Claude CLI.
+
     Returns:
-        True if the stderr indicates a retryable infrastructure failure (e.g., missing or unresolved Node modules, filesystem access errors), False otherwise.
+        `True` if the stderr indicates a retryable infrastructure failure, `False` otherwise.
     """
     # Node.js module loading errors (e.g., missing yoga.wasm)
     if "Cannot find module" in stderr:
