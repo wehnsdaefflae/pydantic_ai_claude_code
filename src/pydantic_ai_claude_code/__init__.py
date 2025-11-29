@@ -65,6 +65,20 @@ from .registration import register_claude_code_model
 from .tools import MCPTool
 from .types import ClaudeCodeSettings
 
+# Import new modular components for convenient access
+from .core import (
+    detect_oauth_error,
+    detect_rate_limit,
+    calculate_wait_time,
+    detect_cli_infrastructure_failure,
+)
+from .structured import (
+    write_structure_to_filesystem,
+    read_structure_from_filesystem,
+    build_structure_instructions,
+)
+from .transport import EnhancedCLITransport, convert_settings_to_sdk_options
+
 # Configure module-level logger
 logger = logging.getLogger(__name__)
 # Use NullHandler by default - consuming applications configure as needed
@@ -83,6 +97,7 @@ except Exception:
     __version__ = "0.0.0.dev"
 
 __all__ = [
+    # Main classes
     "ClaudeCodeModel",
     "ClaudeCodeProvider",
     "ClaudeCodeSettings",
