@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
 
@@ -52,7 +52,14 @@ def convert_primitive_value(
                 return float(value)
             return int(value)
         elif field_type == "boolean":
-            return value.lower() in ("true", "1", "yes")
+            # Properly handle both True and False values
+            lower_val = value.lower()
+            if lower_val in ("true", "1", "yes"):
+                return True
+            elif lower_val in ("false", "0", "no"):
+                return False
+            # For compatibility, return False for other values
+            return False
         elif field_type == "string":
             return value
     except (ValueError, AttributeError):
@@ -252,7 +259,8 @@ def calculate_wait_time(reset_time_str: str) -> int:
         int: Seconds to wait until the reset time plus a one-minute buffer. If the parsed time has already passed today, the wait is computed for the same time on the next day. Returns 300 (5 minutes) if the input cannot be parsed.
     """
     try:
-        now = datetime.now()
+        # Use UTC for consistent timezone handling
+        now = datetime.now(timezone.utc)
         # Parse time like "3PM" or "11AM"
         reset_time_obj = datetime.strptime(reset_time_str, "%I%p")
         reset_datetime = now.replace(

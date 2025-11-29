@@ -65,9 +65,9 @@ def resolve_sandbox_runtime_path(settings: dict[str, Any] | None = None) -> str:
 def build_sandbox_config() -> dict[str, Any]:
     """
     Create the sandbox permissions configuration used when running Claude in the sandbox.
-    
+
     The configuration includes an ordered list of allowed permission strings (e.g., shell access, read/write/edit to /tmp, and WebFetch access to api.anthropic.com).
-    
+
     Returns:
         sandbox_config (dict[str, Any]): A dict with a "permissions" key whose "allow" value is a list of permission specifiers.
     """

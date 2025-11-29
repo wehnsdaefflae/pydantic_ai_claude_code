@@ -39,16 +39,16 @@ def strip_markdown_code_fence(text: str) -> str:
 def extract_json_from_text(text: str, schema: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """
     Extract a JSON object from a text blob using multiple fallback strategies.
-    
+
     Attempts, in order:
     1) Parse the text after removing markdown code fences.
     2) Locate and parse a JSON object substring delimited by the first '{' and last '}'.
     3) If a JSON Schema-like `schema` with exactly one property is provided, return a dict mapping that property name to the cleaned text.
-    
+
     Parameters:
         text (str): Input text that may contain JSON or plain content.
         schema (dict[str, Any] | None): Optional schema guiding extraction. If provided and it contains a single property under the "properties" key, the cleaned text will be returned wrapped as the value for that property.
-    
+
     Returns:
         dict[str, Any] | None: The parsed JSON object on success, or `None` if no valid extraction could be made.
     """

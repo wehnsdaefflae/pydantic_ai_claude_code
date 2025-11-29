@@ -14,17 +14,17 @@ def convert_primitive_value(
 ) -> int | float | bool | str | None:
     """
     Convert a string to a primitive value according to a JSON Schema type.
-    
+
     Supported target types are "integer", "number", "boolean", and "string". For
     "number", an integer is returned when the input contains no decimal point or
     exponent; otherwise a float is returned. For "boolean", the values "true",
-    "1", and "yes" (case-insensitive) are interpreted as True; all other values
-    are interpreted as False.
-    
+    "1", and "yes" (case-insensitive) are interpreted as True; "false", "0",
+    and "no" (case-insensitive) are interpreted as False.
+
     Parameters:
         value (str): The string to convert.
         field_type (str): Target type; one of "integer", "number", "boolean", or "string".
-    
+
     Returns:
         int | float | bool | str | None: The converted value, or `None` if conversion
         fails or `field_type` is not supported.
@@ -38,7 +38,14 @@ def convert_primitive_value(
                 return float(value)
             return int(value)
         elif field_type == "boolean":
-            return value.lower() in ("true", "1", "yes")
+            # Properly handle both True and False values
+            lower_val = value.lower()
+            if lower_val in ("true", "1", "yes"):
+                return True
+            elif lower_val in ("false", "0", "no"):
+                return False
+            # For compatibility, return False for other values
+            return False
         elif field_type == "string":
             return value
     except (ValueError, AttributeError):
@@ -50,10 +57,10 @@ def convert_primitive_value(
 def get_type_description(field_type: str) -> str:
     """
     Provide a human-readable description for a JSON Schema primitive type.
-    
+
     Parameters:
         field_type (str): JSON Schema type name; expected values include "string", "integer", "number", or "boolean".
-    
+
     Returns:
         str: A short human-readable description for the given type (defaults to "Value" for unknown types).
     """

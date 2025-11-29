@@ -19,10 +19,10 @@ def build_function_selection_prompt(
 ) -> tuple[str, dict[str, dict[str, Any]]]:
     """
     Create a user-facing prompt that lists available functions and asks Claude to choose one or 'none'.
-    
+
     Parameters:
         function_tools (list[dict[str, Any]]): List of function tool definitions; each item may include keys like "name", "description", and "parameters_json_schema".
-    
+
     Returns:
         tuple[str, dict[str, dict[str, Any]]]: A tuple where the first element is the composed prompt string and the second is an `available_functions` mapping from function name to a dict containing its "description" and "parameters".
     """
@@ -79,15 +79,15 @@ def build_function_selection_prompt(
 def parse_function_selection(response_text: str) -> str | None:
     """
     Extract the selected function name from Claude's response.
-    
+
     Parameters:
         response_text (str): Raw text returned by Claude containing a single-line choice in the form `CHOICE: <name>`.
-    
+
     Returns:
         str | None: The selected function name in lowercase, the literal string `'none'` if "none" was chosen, or `None` if no valid `CHOICE:` line can be parsed.
     """
-    # Look for CHOICE: pattern
-    match = re.search(r"CHOICE:\s*(\w+)", response_text, re.IGNORECASE)
+    # Look for CHOICE: pattern - support hyphens and underscores in function names
+    match = re.search(r"CHOICE:\s*([\w\-]+)", response_text, re.IGNORECASE)
     if match:
         selection = match.group(1).strip().lower()
         logger.debug("Parsed function selection: %s", selection)
@@ -106,13 +106,13 @@ def build_argument_collection_prompt(
 ) -> str:
     """
     Create a prompt that instructs the model to extract the selected function's arguments from the user's request and write them into a structured set of files in the given temporary directory.
-    
+
     Parameters:
         function_name (str): The selected function's name to include in the instructions.
         function_description (str): Short description of the function to provide context for argument extraction.
         parameters_schema (dict[str, Any]): JSON Schema describing the expected parameters and their types.
         temp_dir (str): Path to the temporary directory where the structured output files should be written.
-    
+
     Returns:
         prompt (str): A prompt string directing the model how to extract arguments and produce the structured output.
     """
@@ -133,13 +133,13 @@ def build_retry_prompt(
 ) -> str:
     """
     Construct a retry prompt that instructs Claude to re-attempt argument collection after a validation error.
-    
+
     Parameters:
         original_prompt (str): The original argument collection prompt that preceded the error.
         schema (dict[str, Any]): JSON schema describing the function's parameters to validate and collect.
         temp_dir (str): Path to a temporary directory where the structured output should be written for the retry.
         error_message (str): Validation error message to present to the model.
-    
+
     Returns:
         str: A prompt string containing the error context and updated structure instructions for the retry.
     """
