@@ -239,14 +239,14 @@ class TestRetryLogic:
 class TestDebugSaver:
     """Tests for debug_saver module."""
 
-    def test_get_debug_dir_enabled_default_path(self, tmp_path):
+    def test_get_debug_dir_enabled_default_path(self):
         """Test getting debug directory when enabled with True."""
         settings = {"debug_save_prompts": True}
-        
+
         with patch("pydantic_ai_claude_code.core.debug_saver.Path") as mock_path:
             mock_path.return_value.mkdir = Mock()
             result = get_debug_dir(settings)
-            
+
             assert result is not None
 
     def test_get_debug_dir_custom_path(self, tmp_path):
@@ -584,19 +584,25 @@ class TestSandboxRuntime:
         """Test that credentials are copied to sandbox config dir."""
         cmd = ["claude", "--print"]
         settings = {"sandbox_runtime_path": "/usr/bin/srt"}
-        
+
         # Create mock credentials
         home_claude_dir = tmp_path / "home" / ".claude"
         home_claude_dir.mkdir(parents=True)
         credentials = home_claude_dir / ".credentials.json"
         credentials.write_text('{"token": "test"}')
-        
+
         with patch("tempfile.mkstemp", return_value=(99, "/tmp/config.json")):
             with patch("os.fdopen", mock_open()):
                 with patch("pydantic_ai_claude_code.core.sandbox_runtime.Path.home", return_value=tmp_path / "home"):
                     with patch("os.makedirs"):
                         with patch("shutil.copy2") as mock_copy:
-                            _, env, _ = wrap_command_with_sandbox(cmd, settings)
+                            wrapped_cmd, env, config_path = wrap_command_with_sandbox(cmd, settings)
 
                             # Should have attempted to copy credentials
                             assert mock_copy.called
+                            # Verify environment variables are set
+                            assert env["IS_SANDBOX"] == "1"
+                            assert "CLAUDE_CONFIG_DIR" in env
+                            assert env["CLAUDE_CONFIG_DIR"] == "/tmp/claude_sandbox_config"
+                            # Verify config path is returned
+                            assert config_path == "/tmp/config.json"
