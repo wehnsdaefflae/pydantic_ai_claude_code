@@ -286,18 +286,20 @@ class TestDebugSaver:
         assert len(files) == 1
         assert files[0].read_text() == prompt
 
-    def test_save_prompt_debug_increments_counter(self, tmp_path):
+    def test_save_prompt_debug_increments_counter(self, tmp_path, monkeypatch):
         """Test that prompt files are numbered sequentially."""
+        monkeypatch.setattr("pydantic_ai_claude_code.core.debug_saver._debug_counter", 0)
+
         debug_dir = tmp_path / "debug"
         settings = {"debug_save_prompts": str(debug_dir)}
         
         save_prompt_debug("First prompt", settings)
         save_prompt_debug("Second prompt", settings)
         
-        files = sorted(debug_dir.glob("*_prompt.md"))
+        files = sorted(list(debug_dir.glob("*_prompt.md")))
         assert len(files) == 2
-        # Files should have different numbers
-        assert files[0].name.startswith("001_") or files[0].name.startswith("002_")
+        assert files[0].name.startswith("001_")
+        assert files[1].name.startswith("002_")
 
     def test_save_response_debug_creates_file(self, tmp_path):
         """Test saving response to debug file."""
