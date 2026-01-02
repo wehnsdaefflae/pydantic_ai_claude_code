@@ -1,4 +1,4 @@
-t# Pydantic AI Claude Code
+# Pydantic AI Claude Code
 
 Use your local Claude Code CLI as a Pydantic AI model provider.
 
